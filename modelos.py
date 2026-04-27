@@ -6,12 +6,11 @@ class EstadoCuadrilla(Enum):
     TRABAJANDO = "Trabajando"
     INACTIVA = "Inactiva"
 
-from enum import Enum
-
 class TipoVisita(Enum):
     INSTALACION = "instalacion"
     TECNICA = "tecnica"
     INCIDENCIA = "incidencia"
+    ALMACEN = "almacen"
 
 class Material:
     def __init__(self, id, cantidad_disponible):
