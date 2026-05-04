@@ -40,7 +40,7 @@ def ejecutar_asignacion(V, C, M, D, M_big, J):
     if not V_estrella or not C_estrella:
         return V, C
 
-    asignaciones = asignar_visitas(V_estrella, C_estrella, D, M_big, M, J, "dinamico")
+    asignaciones = asignar_visitas(V_estrella, C_estrella, D, M_big, M, J, "estatico")
 
     return postprocesar(asignaciones, V, C, M, D, True)
 

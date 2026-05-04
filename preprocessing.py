@@ -18,12 +18,12 @@ def filtrar_por_tiempo(V, C_estrella, D, J):
 
     V_estrella = []
 
-    for v in V:
+    for i, v in enumerate(V):
         factible = False
 
         for c in C_estrella:
 
-            tiempo_total = v.duracion + D[c.posicion][v.id]
+            tiempo_total = v.duracion + D[c.posicion][i]
 
             if (c.tiempo_acumulado + tiempo_total) <= J:
                 factible = True

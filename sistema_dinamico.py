@@ -5,7 +5,7 @@ from postprocessing import postprocesar
 from modelos import EstadoCuadrilla, Visita
 from resultado import visualizar_rutas
 from backend_ui import DATA
-from estado_dinamico import V, C, M, D, J, M_big, INICIALIZADO
+from estado_dinamico import V, C, M, D, J, V_HISTORICO, M_big, INICIALIZADO
 
 import copy
 
@@ -21,31 +21,29 @@ def inicializar_sistema():
 
     print("Inicializando sistema dinámico desde DATA (COPIA PROFUNDA)...")
 
-    # 🧹 limpiar estado dinámico
     V.clear()
     C.clear()
     M.clear()
     D.clear()
-
+    V_HISTORICO.clear()
+    
     V.extend(copy.deepcopy(DATA["V"]))
     C.extend(copy.deepcopy(DATA["C"]))
     M.update(copy.deepcopy(DATA["M"]))
     D.update(copy.deepcopy(DATA["D"]))
+    V_HISTORICO.extend(copy.deepcopy(V))
 
-    # parámetros
     J = copy.deepcopy(DATA["params"]["J"])
     M_big = copy.deepcopy(DATA["params"]["M_big"])
 
     INICIALIZADO = True
 
-    asignacion_inicial_dinamica()
 
 def asignacion_inicial_dinamica():
     global V, C
 
-    print("▶ Asignación inicial dinámica")
+    print("Asignación inicial dinámica")
 
-    # 🔴 Resetear estado de cuadrillas
     for c in C:
         c.reset_dinamico()
 
@@ -75,6 +73,7 @@ def ejecutar_asignacion():
 
 def agregar_visita(visita: Visita):
     V.append(visita)
+    V_HISTORICO.append(copy.deepcopy(visita))
     actualizar_matriz_distancias(D, V, visita)
 
     if any(c.estado == EstadoCuadrilla.LIBRE for c in C):

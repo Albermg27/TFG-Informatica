@@ -55,6 +55,8 @@ class Visita:
             return 60
         elif tipo == TipoVisita.INCIDENCIA:
             return 90
+        else:
+            return 0
     
     def __str__(self):
         return (

@@ -5,3 +5,5 @@ D = {}
 J = 0
 M_big = 0
 INICIALIZADO = False
+
+V_HISTORICO = []

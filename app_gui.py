@@ -4,9 +4,10 @@ import webbrowser
 from collections import Counter
 from backend_ui import cargar_visitas_gui, ejecutar_planificacion_gui, obtener_cuadrillas
 from ui_utils import texto_cuadrilla_resumen, texto_cuadrilla_detalle
-from sistema_dinamico import (inicializar_sistema, agregar_visita, actualizar_stock, cambiar_estado_cuadrilla, terminar_sistema)
-from modelos import Visita
+from sistema_dinamico import (asignacion_inicial_dinamica, inicializar_sistema, agregar_visita, actualizar_stock, cambiar_estado_cuadrilla, terminar_sistema)
+from modelos import TipoVisita, Visita
 from estado_dinamico import V, C, D, M
+from estado_dinamico import V_HISTORICO
 
 # APP CONFIG
 root = tk.Tk()
@@ -15,7 +16,7 @@ root.geometry("1200x700")
 root.configure(bg="#f4f6f9")
 
 filtro_tipo = tk.StringVar(value="TODAS")
-visitas_cache = []
+#visitas_cache = []
 
 # STYLE COLORS
 BG_APP = "#f4f6f9"
@@ -65,13 +66,13 @@ def pantalla_visitas():
         }
     }
 
-    global visitas_cache
+    #global visitas_cache
 
     limpiar()
-    visitas_cache = cargar_visitas_gui()
+    #visitas_cache = cargar_visitas_gui()
 
     # HEADER
-    total, conteo = calcular_stats(visitas_cache)
+    total, conteo = calcular_stats(V_HISTORICO)
 
     header = tk.Frame(content, bg=BG_APP)
     header.pack(fill="x", pady=10)
@@ -150,7 +151,7 @@ def pantalla_visitas():
         for w in filtro_frame.winfo_children():
             w.destroy()
 
-        tipos = ["TODAS"] + list(set(v.tipo.value for v in visitas_cache))
+        tipos = ["TODAS"] + list(set(v.tipo.value for v in V_HISTORICO))
 
         tk.Label(
             filtro_frame,
@@ -230,9 +231,9 @@ def pantalla_visitas():
         filtro = filtro_tipo.get()
 
         if filtro == "TODAS":
-            datos = visitas_cache
+            datos = V_HISTORICO
         else:
-            datos = [v for v in visitas_cache if v.tipo.value == filtro]
+            datos = [v for v in V_HISTORICO if v.tipo.value == filtro]
 
         COLS = 4
         CARD_W = 460
@@ -488,7 +489,7 @@ def terminar_sistema_gui():
     render_estado()
 
 def refrescar_inicializar():
-    inicializar_sistema()
+    asignacion_inicial_dinamica()
     render_estado()
 
 def texto_ubicacion_cuadrilla(c):
@@ -655,51 +656,201 @@ def render_estado():
                 command=fin
             ).pack(side="right")
 
-def formulario_visita():
+def crear_modal_scrollable(titulo, ancho=420, alto=520):
     win = tk.Toplevel(root)
-    win.title("Nueva Visita")
+    win.title(titulo)
+    win.configure(bg=BG_APP)
+    win.geometry(f"{ancho}x{alto}")
+    win.minsize(ancho, alto)
+
+    win.update_idletasks()
+    x = (win.winfo_screenwidth() // 2) - (ancho // 2)
+    y = (win.winfo_screenheight() // 2) - (alto // 2)
+    win.geometry(f"+{x}+{y}")
+
+    container = tk.Frame(win, bg=BG_APP)
+    container.pack(fill="both", expand=True)
+
+    canvas = tk.Canvas(container, bg=BG_APP, highlightthickness=0)
+    scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+    scroll_frame = tk.Frame(canvas, bg=BG_APP)
+
+    scroll_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+
+    canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
+    return win, scroll_frame
+
+def campo_select(parent, label, row, col, valores):
+    frame = tk.Frame(parent, bg=BG_CARD)
+    frame.grid(row=row, column=col, sticky="ew", padx=10, pady=8)
+
+    tk.Label(frame, text=label,
+             font=("Segoe UI", 9),
+             bg=BG_CARD, fg=SUBTEXT).pack(anchor="w")
+
+    combo = ttk.Combobox(frame,
+                         values=valores,
+                         state="readonly",
+                         font=("Segoe UI", 11))
+    combo.pack(fill="x", ipady=4, pady=3)
+    combo.current(0)
+
+    return combo
+
+def formulario_visita():
+    win, parent = crear_modal_scrollable("Nueva visita", 720, 560)
+
+    card = tk.Frame(parent, bg=BG_CARD, padx=22, pady=20,
+                    highlightthickness=1, highlightbackground="#e5e7eb")
+    card.pack(padx=20, pady=20, fill="both", expand=True)
+
+    tk.Label(card, text="➕ Nueva visita",
+             font=("Segoe UI", 17, "bold"),
+             bg=BG_CARD, fg="#16a34a").pack(anchor="w")
+
+    tk.Label(card,
+             text="Registrar nueva visita en el sistema",
+             font=("Segoe UI", 10),
+             bg=BG_CARD, fg=SUBTEXT).pack(anchor="w", pady=(0,18))
 
     entries = {}
 
-    for i, f in enumerate(["tipo", "prioridad", "nombre", "latitud", "longitud"]):
-        tk.Label(win, text=f).grid(row=i, column=0)
-        e = tk.Entry(win)
-        e.grid(row=i, column=1)
-        entries[f] = e
+    def campo(parent, label, row, col, ejemplo=""):
+        frame = tk.Frame(parent, bg=BG_CARD)
+        frame.grid(row=row, column=col, sticky="ew", padx=10, pady=8)
+
+        tk.Label(frame, text=label,
+                font=("Segoe UI", 9),
+                bg=BG_CARD, fg=SUBTEXT).pack(anchor="w")
+
+        e = tk.Entry(frame, font=("Segoe UI", 11),
+                    relief="flat", highlightthickness=1,
+                    highlightbackground="#d1d5db")
+        e.pack(fill="x", ipady=7, pady=3)
+
+        if ejemplo:
+            e.insert(0, ejemplo)
+            e.config(fg="#9ca3af")
+
+            def clear_hint(event):
+                if e.get() == ejemplo:
+                    e.delete(0, "end")
+                    e.config(fg=TEXT)
+            e.bind("<FocusIn>", clear_hint)
+
+        return e
+    
+    form = tk.Frame(card, bg=BG_CARD)
+    form.pack(fill="x")
+
+    # dos columnas responsivas
+    form.columnconfigure(0, weight=1)
+    form.columnconfigure(1, weight=1)
+
+    entries = {}
+
+    entries["nombre"] = campo(form, "Cliente", 0, 0)
+    entries["nombre"].master.grid(columnspan=2)
+
+    entries["tipo"] = campo_select(
+        form, "Tipo", 1, 0,
+        ["instalacion", "tecnica", "incidencia"]
+    )
+    entries["prioridad"] = campo(form, "Prioridad", 1, 1, "1-10")
+
+    entries["latitud"] = campo(form, "Latitud", 2, 0, "40.4168")
+    entries["longitud"] = campo(form, "Longitud", 2, 1, "-3.7038")
+
+    msg = tk.Label(card, text="", bg=BG_CARD, fg="#dc2626",
+                   font=("Segoe UI", 9))
+    msg.pack(pady=(8,0))
 
     def crear():
-        visita = Visita(
-            tipo=entries["tipo"].get(),
-            prioridad=int(entries["prioridad"].get()),
-            nombre=entries["nombre"].get(),
-            latitud=float(entries["latitud"].get()),
-            longitud=float(entries["longitud"].get())
-        )
+        try:
+            tipo = TipoVisita(entries["tipo"].get().strip().lower())
+            visita = Visita(
+                tipo=tipo,
+                prioridad=int(entries["prioridad"].get()),
+                nombre=entries["nombre"].get(),
+                latitud=float(entries["latitud"].get()),
+                longitud=float(entries["longitud"].get())
+            )
 
-        agregar_visita(visita)
-        render_estado()
-        win.destroy()
+            agregar_visita(visita)
+            render_estado()
+            win.destroy()
 
-    tk.Button(win, text="Crear", command=crear).grid(row=6, column=0, columnspan=2)
+        except:
+            msg.config(text="Revisa los datos introducidos")
 
+    tk.Button(card, text="Crear visita",
+              command=crear,
+              bg="#16a34a", fg="white",
+              activebackground="#15803d",
+              font=("Segoe UI", 11, "bold"),
+              relief="flat", pady=12).pack(fill="x", pady=18)
+    
 def formulario_stock():
-    win = tk.Toplevel(root)
-    win.title("Stock")
+    win, parent = crear_modal_scrollable("Actualizar stock", 420, 420)
 
-    tk.Label(win, text="ID material").grid(row=0, column=0)
-    id_e = tk.Entry(win)
-    id_e.grid(row=0, column=1)
+    card = tk.Frame(parent, bg=BG_CARD, padx=22, pady=20,
+                    highlightthickness=1, highlightbackground="#e5e7eb")
+    card.pack(padx=20, pady=20, fill="both", expand=True)
 
-    tk.Label(win, text="Cantidad").grid(row=1, column=0)
-    c_e = tk.Entry(win)
-    c_e.grid(row=1, column=1)
+    tk.Label(card, text="📦 Actualizar stock",
+             font=("Segoe UI", 17, "bold"),
+             bg=BG_CARD, fg="#d97706").pack(anchor="w")
+
+    tk.Label(card,
+             text="Añadir material disponible",
+             font=("Segoe UI", 10),
+             bg=BG_CARD, fg=SUBTEXT).pack(anchor="w", pady=(0,18))
+
+    def campo(label):
+        frame = tk.Frame(card, bg=BG_CARD)
+        frame.pack(fill="x", pady=10)
+
+        tk.Label(frame, text=label,
+                 font=("Segoe UI", 9),
+                 bg=BG_CARD, fg=SUBTEXT).pack(anchor="w")
+
+        e = tk.Entry(frame, font=("Segoe UI", 11),
+                     relief="flat", highlightthickness=1,
+                     highlightbackground="#d1d5db")
+        e.pack(fill="x", ipady=7, pady=3)
+        return e
+
+    id_e = campo("ID material")
+    c_e = campo("Cantidad")
+
+    msg = tk.Label(card, text="", bg=BG_CARD, fg="#dc2626",
+                   font=("Segoe UI", 9))
+    msg.pack()
 
     def aplicar():
-        ok = actualizar_stock(int(id_e.get()), int(c_e.get()))
-        render_estado()
-        win.destroy()
+        try:
+            if not actualizar_stock(int(id_e.get()), int(c_e.get())):
+                msg.config(text="Material no encontrado")
+                return
+            render_estado()
+            win.destroy()
+        except:
+            msg.config(text="Valores inválidos")
 
-    tk.Button(win, text="Actualizar", command=aplicar).grid(row=2, column=0, columnspan=2)
+    tk.Button(card, text="Actualizar stock",
+              command=aplicar,
+              bg="#d97706", fg="white",
+              activebackground="#b45309",
+              font=("Segoe UI", 11, "bold"),
+              relief="flat", pady=12).pack(fill="x", pady=18)
 
 def formulario_estado():
     win = tk.Toplevel(root)
@@ -730,11 +881,36 @@ def generar_planificacion():
 
 
 # SIDEBAR
+boton_activo = None
+botones_menu = {}
+
 def boton(txt, cmd):
-    return tk.Button(menu, text=txt, fg="white", bg=BG_MENU,
-                     activebackground=PRIMARY, activeforeground="white",
-                     relief="flat", font=("Segoe UI", 11),
-                     pady=15, command=cmd)
+    def wrapper():
+        global boton_activo
+
+        if boton_activo:
+            boton_activo.config(bg=BG_MENU)
+
+        cmd()
+
+        boton_activo = botones_menu[txt]
+        boton_activo.config(bg=PRIMARY)
+
+    btn = tk.Button(
+        menu,
+        text=txt,
+        fg="white",
+        bg=BG_MENU,
+        activebackground=PRIMARY,
+        activeforeground="white",
+        relief="flat",
+        font=("Segoe UI", 11),
+        pady=15,
+        command=wrapper
+    )
+
+    botones_menu[txt] = btn
+    return btn
 
 boton("Visitas", pantalla_visitas).pack(fill="x")
 boton("Planificación", pantalla_planificacion).pack(fill="x")
@@ -742,5 +918,6 @@ boton("Sistema Dinámico", pantalla_dinamico).pack(fill="x")
 
 
 # START
+inicializar_sistema()
 pantalla_visitas()
 root.mainloop()

@@ -14,7 +14,7 @@ def asignar_visitas(V, C, D, M_big, materiales, J, modo):
     # Funcion objetivo
 
     distancia_total = quicksum(
-        D[cuadrilla.posicion][v.id] * x[i, c]
+        D[cuadrilla.posicion][i] * x[i, c]
         for i, v in enumerate(V)
         for c, cuadrilla in enumerate(C)
     )
