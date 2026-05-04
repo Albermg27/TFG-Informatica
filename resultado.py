@@ -60,5 +60,5 @@ def visualizar_rutas(cuadrillas, visitas_no_asignadas):
             icon=folium.Icon(color="gray", icon="info-sign")
         ).add_to(mapa)
 
-    mapa.save("rutas.html")
-    print("\nMapa generado: rutas.html")
+    mapa.save("mapa.html")
+    print("\nMapa generado: mapa.html")

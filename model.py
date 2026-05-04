@@ -1,6 +1,6 @@
 from gurobipy import Model, GRB, quicksum
 
-def asignar_visitas(V, C, D, M_big, materiales, J):
+def asignar_visitas(V, C, D, M_big, materiales, J, modo):
     
     model = Model("Asignacion_de_Visitas")
     model.Params.OutputFlag = 0
@@ -39,13 +39,26 @@ def asignar_visitas(V, C, D, M_big, materiales, J):
     for c in range(len(C)): model.addConstr(quicksum(x[i, c] for i in range(len(V))) <= 1)
 
     # Restricción de disponibilidad global de materiales
-    for m_id, stock in materiales.items():
-        model.addConstr(
-            quicksum(v.materiales_necesarios.get(m_id, 0) * x[i, c]
-                for i, v in enumerate(V)
-                for c in range(len(C))
-            ) <= stock.cantidad_disponible
-        )
+
+    if modo == "estatico":
+        for m_id, stock in materiales.items():
+            model.addConstr(
+                quicksum(
+                    v.materiales_necesarios.get(m_id, 0) * x[i, c]
+                    for i, v in enumerate(V)
+                    for c in range(len(C))
+                ) <= stock.cantidad_disponible
+            )
+
+    if modo == "dinamico":
+        for c, cuadrilla in enumerate(C):
+            for m_id in materiales.keys():
+                model.addConstr(
+                    quicksum(
+                        v.materiales_necesarios.get(m_id, 0) * x[i, c]
+                        for i, v in enumerate(V)
+                    ) <= cuadrilla.materiales.get(m_id, 0)
+                )
 
     # Restricción de jornada laboral global
     for i, v in enumerate(V):

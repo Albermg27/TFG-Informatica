@@ -62,7 +62,7 @@ class Visita:
         )
     
 class Cuadrilla:
-    def __init__(self, id, estado="Libre"):
+    def __init__(self, id, estado="Libre", materiales=None):
         self.id = id
         self.ruta = []
         self.estado = estado
@@ -74,6 +74,7 @@ class Cuadrilla:
         self.tiempo_desplazamiento = 0
         self.tiempo_trabajo = 0
         self.tiempo_estimado_viaje = 0
+        self.materiales = materiales or {}
     
     def iniciar_desplazamiento(self, visita, tiempo_viaje):
         self.visita_actual = visita
@@ -106,7 +107,6 @@ class Cuadrilla:
         t_ini = self.tiempo_inicio_visita
         t_fin = self.tiempo_acumulado
         self.historial.append((visita, t_ini, t_fin))
-        self.visita_actual = None
         self.tiempo_inicio_visita = None
 
         if self.tiempo_acumulado >= J:
@@ -149,3 +149,13 @@ class Cuadrilla:
                     self.estado = EstadoCuadrilla.INACTIVA
                 else:
                     self.estado = EstadoCuadrilla.LIBRE
+
+    def consumir_materiales_cuadrilla(cuadrilla, visita):
+        for m_id, cantidad in visita.materiales_necesarios.items():
+            cuadrilla.materiales[m_id] -= cantidad
+
+    def reset_dinamico(self):
+        self.estado = EstadoCuadrilla.LIBRE
+        self.ruta_actual = []
+        self.tiempo_restante = 0
+        self.visita_actual = None
