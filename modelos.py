@@ -13,8 +13,8 @@ class TipoVisita(Enum):
     ALMACEN = "almacen"
 
 class Material:
-    def __init__(self, id, cantidad_disponible):
-        self.id = id
+    def __init__(self, nombre, cantidad_disponible):
+        self.nombre = nombre
         self.cantidad_disponible = cantidad_disponible
     
     def consumir(self, cantidad):
@@ -24,7 +24,7 @@ class Material:
         return False
 
     def __str__(self):
-        return f"Material({self.id}, stock={self.cantidad_disponible})"
+        return f"{self.cantidad_disponible}"
 
 class Visita:
 

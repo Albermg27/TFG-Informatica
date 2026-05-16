@@ -3,6 +3,7 @@ from database.session import SessionLocal
 from database.models import VisitaDB, VisitaMaterialDB
 
 from database.repository import (
+    get_materiales_cuadrilla_db,
     get_materiales_db,
     get_visitas_db,
     get_cuadrillas_db
@@ -61,7 +62,7 @@ def cargar_materiales():
 
     materiales = {}
     for m in materiales_db:
-        materiales[m.id] = Material(m.id, m.stock)
+        materiales[m.nombre] = Material(m.nombre, m.stock)
 
     return materiales
 
@@ -69,10 +70,25 @@ def cargar_cuadrillas():
     cuadrillas_db = get_cuadrillas_db()
 
     C = []
+
     for cdb in cuadrillas_db:
-        c = Cuadrilla(cdb.id, EstadoCuadrilla.LIBRE)
+
+        materiales = get_materiales_cuadrilla_db(cdb.id)
+
+        mat_dict = {
+            m.nombre: cm.cantidad
+            for cm, m in materiales
+        }
+
+        c = Cuadrilla(
+            id=cdb.id,
+            estado=EstadoCuadrilla.LIBRE,
+            materiales=mat_dict
+        )
+
         c.posicion = 0
         c.tiempo_acumulado = 0
+
         C.append(c)
 
     return C

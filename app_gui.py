@@ -3,9 +3,10 @@ from tkinter import ttk
 import webbrowser
 from collections import Counter
 from backend_ui import cargar_visitas_gui, ejecutar_planificacion_gui, obtener_cuadrillas
+from database.repository import get_materiales_visita_db
 from ui_utils import texto_cuadrilla_resumen, texto_cuadrilla_detalle
 from sistema_dinamico import (asignacion_inicial_dinamica, inicializar_sistema, agregar_visita, actualizar_stock, cambiar_estado_cuadrilla, terminar_sistema)
-from modelos import TipoVisita, Visita
+from modelos import Material, TipoVisita, Visita
 from estado_dinamico import V, C, D, M
 from estado_dinamico import V_HISTORICO
 
@@ -216,15 +217,8 @@ def pantalla_visitas():
     def icono_tipo(tipo):
         return TIPO_CONFIG.get(tipo, TIPO_CONFIG["TODAS"])["icono"]
 
-    def color_prioridad(p):
-        if p >= 8:
-            return "#dc2626"
-        if p >= 5:
-            return "#d97706"
-        return "#16a34a"
 
     def render_lista():
-        
         for w in inner.winfo_children():
             w.destroy()
 
@@ -236,71 +230,114 @@ def pantalla_visitas():
             datos = [v for v in V_HISTORICO if v.tipo.value == filtro]
 
         COLS = 4
-        CARD_W = 460
-        CARD_H = 140
+        PAD = 12
+
+        for c in range(COLS):
+            inner.grid_columnconfigure(c, weight=1)
 
         for i, v in enumerate(datos):
+            materiales = get_materiales_visita_db(v.id)
+
             r = i // COLS
             c = i % COLS
 
             card = tk.Frame(
                 inner,
-                bg=BG_CARD,
-                width=CARD_W,
-                height=CARD_H,
+                bg="#ffffff",
                 highlightthickness=1,
                 highlightbackground="#e5e7eb",
                 padx=12,
                 pady=10
             )
-            card.grid(row=r, column=c, padx=12, pady=12, sticky="nsew")
-            card.grid_propagate(False)
+            card.grid(row=r, column=c, padx=PAD, pady=PAD, sticky="nsew")
+            card.grid_columnconfigure(0, weight=1)
 
-            top = tk.Frame(card, bg=BG_CARD)
-            top.pack(fill="x")
-
-            tk.Label(top,
-                text=f"{icono_tipo(v.tipo.value)}  {v.nombre}",
-                bg=BG_CARD, fg=TEXT,
+            tk.Label(
+                card,
+                text=f"{icono_tipo(v.tipo.value)} {v.nombre}",
+                bg="#ffffff",
+                fg="#111827",
                 font=("Segoe UI", 11, "bold")
             ).pack(anchor="w")
 
-            badges = tk.Frame(card, bg=BG_CARD)
-            badges.pack(fill="x", pady=(4,8))
+            badge_row = tk.Frame(card, bg="#ffffff")
+            badge_row.pack(fill="x", pady=(6, 6))
+
+            tipo_bg_map = {
+                "instalacion": "#dbeafe",
+                "tecnica": "#dcfce7",
+                "incidencia": "#fee2e2",
+                "almacen": "#e5e7eb"
+            }
+
+            tipo_bg = tipo_bg_map.get(v.tipo.value, "#f3f4f6")
 
             tk.Label(
-                badges,
-                text=v.tipo.value,
-                bg="#eef2ff",
-                fg=PRIMARY,
-                padx=8,
+                badge_row,
+                text=v.tipo.value.upper(),
+                bg=tipo_bg,
+                fg="#374151",
+                padx=10,
                 pady=3,
                 font=("Segoe UI", 8, "bold")
             ).pack(side="left")
 
             tk.Label(
-                badges,
+                badge_row,
                 text=f"Prioridad {v.prioridad}",
-                bg=color_prioridad(v.prioridad),
-                fg="white",
+                bg="#f9fafb",
+                fg="#6b7280",
                 padx=8,
                 pady=3,
-                font=("Segoe UI", 8, "bold")
+                font=("Segoe UI", 8)
             ).pack(side="right")
 
-            tk.Label(card,
+            tk.Label(
+                card,
                 text=f"⏱ {v.duracion} min",
-                bg=BG_CARD, fg=SUBTEXT,
+                bg="#ffffff",
+                fg="#6b7280",
                 font=("Segoe UI", 9)
             ).pack(anchor="w")
 
-            tk.Label(card,
+            tk.Label(
+                card,
                 text=f"📍 {v.latitud:.3f}, {v.longitud:.3f}",
-                bg=BG_CARD, fg=SUBTEXT,
+                bg="#ffffff",
+                fg="#9ca3af",
                 font=("Segoe UI", 9)
-            ).pack(anchor="w", pady=(0,6))
+            ).pack(anchor="w", pady=(0, 6))
 
+            mat_frame = tk.Frame(card, bg="#ffffff")
+            mat_frame.pack(fill="x")
 
+            tk.Label(
+                mat_frame,
+                text="Materiales:",
+                bg="#ffffff",
+                fg="#111827",
+                font=("Segoe UI", 9, "bold")
+            ).pack(anchor="w")
+
+            if materiales:
+                for vm, material in materiales:
+                    tk.Label(
+                        mat_frame,
+                        text=f"• {material.nombre}  x{vm.cantidad}",
+                        bg="#ffffff",
+                        fg="#4b5563",
+                        font=("Segoe UI", 8)
+                    ).pack(anchor="w")
+            else:
+                tk.Label(
+                    mat_frame,
+                    text="• Sin materiales",
+                    bg="#ffffff",
+                    fg="#9ca3af",
+                    font=("Segoe UI", 8)
+                ).pack(anchor="w")
+
+    canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas.find_all()[0], width=e.width))
     render_lista()
 
 
@@ -448,7 +485,7 @@ def pantalla_dinamico():
 
         return card
 
-    card_accion(acciones, "Inicializar sistema", "▶️", PRIMARY, refrescar_inicializar)
+    card_accion(acciones, "Inicializar jornada", "▶️", PRIMARY, refrescar_inicializar)
     card_accion(acciones, "Añadir visita", "➕", "#16a34a", formulario_visita)
     card_accion(acciones, "Actualizar stock", "📦", "#d97706", formulario_stock)
     card_accion(acciones, "Finalizar jornada", "🛑", "#dc2626", terminar_sistema_gui)
@@ -498,6 +535,17 @@ def texto_ubicacion_cuadrilla(c):
         return f"{v.nombre} ({v.latitud:.3f}, {v.longitud:.3f})"
 
     return f"Nodo {c.posicion}"
+
+def estado_visual(estado):
+        if estado == "DESPLAZANDOSE":
+            return "🚚 Desplazándose", "#2563eb"
+        if estado == "TRABAJANDO":
+            return "🔧 Trabajando", "#16a34a"
+        if estado == "LIBRE":
+            return "🟡 Libre", "#d97706"
+        if estado == "INACTIVA":
+            return "🏁 Jornada finalizada", "#dc2626"
+        return "⚪ Desconocido", "#6b7280"
     
 def render_estado():
     for w in estado_frame.winfo_children():
@@ -529,16 +577,7 @@ def render_estado():
     stat_card(f"Visitas: {len(V)}")
     stat_card(f"Cuadrillas: {len(C)}")
 
-    def estado_visual(estado):
-        if estado == "DESPLAZANDOSE":
-            return "🚚 Desplazándose", "#2563eb"
-        if estado == "TRABAJANDO":
-            return "🔧 Trabajando", "#16a34a"
-        if estado == "LIBRE":
-            return "🟡 Libre", "#d97706"
-        if estado == "INACTIVA":
-            return "🏁 Jornada finalizada", "#dc2626"
-        return "⚪ Desconocido", "#6b7280"
+    
 
     grid = tk.Frame(estado_frame, bg=BG_CARD)
     grid.pack(fill="both", expand=True)
@@ -751,7 +790,6 @@ def formulario_visita():
     form = tk.Frame(card, bg=BG_CARD)
     form.pack(fill="x")
 
-    # dos columnas responsivas
     form.columnconfigure(0, weight=1)
     form.columnconfigure(1, weight=1)
 
@@ -879,6 +917,397 @@ def generar_planificacion():
     ejecutar_planificacion_gui()
     pantalla_planificacion()
 
+def popup_agregar_material(cuadrilla):
+    win = tk.Toplevel(root)
+    win.title(f"Añadir material - Cuadrilla {cuadrilla.id}")
+    win.geometry("320x220")
+
+    tk.Label(win, text="Material disponible").pack(pady=5)
+
+    materiales_disponibles = list(M.keys())
+
+    combo = ttk.Combobox(win, values=materiales_disponibles, state="readonly")
+    combo.pack()
+
+    tk.Label(win, text="Cantidad").pack(pady=5)
+    entry_cant = tk.Entry(win)
+    entry_cant.pack()
+
+    def guardar():
+        mat = combo.get()
+
+        if not mat:
+            return
+
+        try:
+            cant = int(entry_cant.get())
+        except:
+            return
+
+        material = M.get(mat)
+
+        if not material:
+            print("Material no existe")
+            return
+
+        if material.cantidad_disponible < cant:
+            print("❌ No hay suficiente stock en almacén")
+            return
+
+        material.cantidad_disponible -= cant
+
+        cuadrilla.materiales[mat] = cuadrilla.materiales.get(mat, 0) + cant
+
+        win.destroy()
+        render_cuadrillas()
+
+    tk.Button(win, text="Guardar", command=guardar).pack(pady=15)
+
+def popup_consumir_material(cuadrilla):
+    win = tk.Toplevel(root)
+    win.title(f"Consumir material - Cuadrilla {cuadrilla.id}")
+    win.geometry("320x220")
+
+    tk.Label(win, text="Material en cuadrilla").pack(pady=5)
+
+    materiales_disponibles = list(cuadrilla.materiales.keys())
+
+    combo = ttk.Combobox(win, values=materiales_disponibles, state="readonly")
+    combo.pack()
+
+    tk.Label(win, text="Cantidad a consumir").pack(pady=5)
+    entry_cant = tk.Entry(win)
+    entry_cant.pack()
+
+    def consumir():
+        mat = combo.get()
+
+        if not mat:
+            return
+
+        try:
+            cant = int(entry_cant.get())
+        except:
+            return
+
+        if mat not in cuadrilla.materiales:
+            print("Material no existe en la cuadrilla")
+            return
+
+        actual = cuadrilla.materiales[mat]
+
+        if cant > actual:
+            print("❌ No puedes consumir más de lo que tienes")
+            return
+
+        nueva_cant = actual - cant
+
+        if nueva_cant == 0:
+            del cuadrilla.materiales[mat]
+        else:
+            cuadrilla.materiales[mat] = nueva_cant
+
+        win.destroy()
+        render_cuadrillas()
+
+    tk.Button(win, text="Consumir", command=consumir).pack(pady=15)
+
+def materiales_texto(materiales):
+    if not materiales:
+        return "Sin materiales asignados"
+
+    partes = []
+
+    for nombre, cantidad in materiales.items():
+        partes.append(f"• {nombre} x{cantidad}")
+
+    return "\n".join(partes)
+
+def render_cuadrillas():
+    for w in cuadrillas_frame.winfo_children():
+        w.destroy()
+
+    grid = tk.Frame(cuadrillas_frame, bg=BG_CARD)
+    grid.pack(fill="both", expand=True)
+
+    COLS = 2
+
+    for i, c in enumerate(C):
+        r = i // COLS
+        col = i % COLS
+
+        card = tk.Frame(
+            grid,
+            bg=BG_APP,
+            highlightthickness=1,
+            highlightbackground="#e5e7eb",
+            padx=12,
+            pady=12
+        )
+        card.grid(row=r, column=col, padx=8, pady=8, sticky="nsew")
+        grid.grid_columnconfigure(col, weight=1)
+
+        tk.Label(card,
+                 text=f"Cuadrilla {c.id}",
+                 font=("Segoe UI", 13, "bold"),
+                 bg=BG_APP, fg=TEXT).pack(anchor="w")
+
+        estado_txt, color = estado_visual(c.estado.name)
+
+        tk.Label(card,
+                text=f"Estado: {estado_txt}",
+                font=("Segoe UI", 10, "bold"),
+                bg=BG_APP, fg=color).pack(anchor="w", pady=(0,5))
+
+        mat_frame = tk.Frame(card, bg=BG_APP)
+        mat_frame.pack(anchor="w", pady=(5,10), fill="x")
+
+        for nombre, cantidad in c.materiales.items():
+            chip = tk.Frame(mat_frame, bg="#e5e7eb", padx=6, pady=2)
+            chip.pack(side="top", anchor="w", pady=2)
+
+            tk.Label(chip,
+                    text=f"{nombre} x{cantidad}",
+                    font=("Segoe UI", 9),
+                    bg="#e5e7eb",
+                    fg=TEXT).pack()
+
+        acciones = tk.Frame(card, bg=BG_APP)
+        acciones.pack(anchor="e")
+
+        tk.Button(acciones, text="➕ Añadir material",
+                  command=lambda c=c: popup_agregar_material(c)
+        ).pack(side="left", padx=5)
+
+        tk.Button(acciones, text="➖ Consumir",
+                  command=lambda c=c: popup_consumir_material(c)
+        ).pack(side="left")
+
+def pantalla_cuadrillas():
+    limpiar()
+
+    # HEADER
+    header = tk.Frame(content, bg=BG_APP)
+    header.pack(fill="x", pady=10)
+
+    tk.Label(header, text="Gestión de cuadrillas",
+             font=("Segoe UI", 18, "bold"),
+             bg=BG_APP, fg=TEXT).pack(anchor="w", padx=10)
+
+    tk.Label(header,
+             text="Consulta y gestión de materiales de cada cuadrilla",
+             font=("Segoe UI", 10),
+             bg=BG_APP, fg=SUBTEXT).pack(anchor="w", padx=10)
+
+    panel = tk.Frame(
+        content,
+        bg=BG_CARD,
+        highlightthickness=1,
+        highlightbackground="#e5e7eb",
+        padx=15, pady=15
+    )
+    panel.pack(fill="both", expand=True, padx=10, pady=10)
+
+    global cuadrillas_frame
+    cuadrillas_frame = tk.Frame(panel, bg=BG_CARD)
+    cuadrillas_frame.pack(fill="both", expand=True)
+
+    render_cuadrillas()
+
+def seleccionar_material(win):
+    tk.Label(win, text="Material").pack()
+
+    var = tk.StringVar()
+    combo = ttk.Combobox(win, textvariable=var, values=list(M.keys()), state="readonly")
+    combo.pack()
+
+    return var
+
+def popup_delete_material():
+
+    win = tk.Toplevel(root)
+    win.title("Eliminar material")
+    win.geometry("300x200")
+
+    var = tk.StringVar()
+
+    tk.Label(win, text="Selecciona material").pack()
+
+    combo = ttk.Combobox(win, textvariable=var, values=list(M.keys()), state="readonly")
+    combo.pack()
+
+    def eliminar():
+
+        nombre = var.get()
+        if not nombre:
+            return
+
+        if nombre in M:
+            del M[nombre]
+
+        win.destroy()
+        render_materiales()
+
+    tk.Button(win, text="Eliminar", command=eliminar).pack(pady=10)
+
+def popup_edit_material():
+
+    win = tk.Toplevel(root)
+    win.title("Editar material")
+    win.geometry("300x220")
+
+    var = tk.StringVar()
+
+    tk.Label(win, text="Selecciona material").pack()
+
+    combo = ttk.Combobox(win, textvariable=var, values=list(M.keys()), state="readonly")
+    combo.pack()
+
+    tk.Label(win, text="Nueva cantidad").pack(pady=(10,0))
+
+    e = tk.Entry(win)
+    e.pack()
+
+    def guardar():
+
+        nombre = var.get()
+        if not nombre:
+            return
+
+        try:
+            M[nombre] = int(e.get())
+        except:
+            return
+
+        win.destroy()
+        render_materiales()
+
+    tk.Button(win, text="Guardar cambios", command=guardar).pack(pady=10)
+
+def popup_add_material_global():
+    win = tk.Toplevel(root)
+    win.title("Añadir material")
+    win.geometry("300x200")
+
+    tk.Label(win, text="Nombre").pack()
+    e_id = tk.Entry(win)
+    e_id.pack()
+
+    tk.Label(win, text="Cantidad").pack()
+    e_cant = tk.Entry(win)
+    e_cant.pack()
+
+    def guardar():
+        try:
+            nombre = e_id.get()
+            cant = int(e_cant.get())
+        except:
+            return
+
+        M[nombre] = M.get(nombre, 0) + cant
+        win.destroy()
+        render_materiales()
+
+    tk.Button(win, text="Guardar", command=guardar).pack(pady=10)
+
+def render_materiales():
+    for w in materiales_frame.winfo_children():
+        w.destroy()
+
+    grid = tk.Frame(materiales_frame, bg=BG_CARD)
+    grid.pack(fill="both", expand=True)
+
+    COLS = 3
+
+    for i, (nombre, stock) in enumerate(M.items()):
+        r = i // COLS
+        c = i % COLS
+
+        card = tk.Frame(
+            grid,
+            bg=BG_APP,
+            padx=12,
+            pady=12,
+            highlightthickness=1,
+            highlightbackground="#e5e7eb"
+        )
+        card.grid(row=r, column=c, padx=8, pady=8, sticky="nsew")
+        grid.grid_columnconfigure(c, weight=1)
+
+        tk.Label(card,
+                 text=f"📦 {nombre}",
+                 font=("Segoe UI", 12, "bold"),
+                 bg=BG_APP, fg=TEXT).pack(anchor="w")
+
+        stock_frame = tk.Frame(card, bg=BG_APP)
+        stock_frame.pack(anchor="w")
+
+        tk.Label(stock_frame,
+                text="Stock: ",
+                font=("Segoe UI", 10),
+                bg=BG_APP, fg=SUBTEXT).pack(side="left")
+
+        tk.Label(stock_frame,
+            text=str(stock),
+            font=("Segoe UI", 10, "bold"),
+            bg=BG_APP, fg=PRIMARY).pack(side="left")
+
+def pantalla_materiales():
+    limpiar()
+
+    header = tk.Frame(content, bg=BG_APP)
+    header.pack(fill="x", pady=10)
+
+    tk.Label(header, text="Gestión de materiales",
+             font=("Segoe UI", 18, "bold"),
+             bg=BG_APP, fg=TEXT).pack(anchor="w", padx=10)
+
+    tk.Label(header,
+             text="Añadir, modificar o eliminar materiales del sistema",
+             font=("Segoe UI", 10),
+             bg=BG_APP, fg=SUBTEXT).pack(anchor="w", padx=10)
+
+    acciones = tk.Frame(content, bg=BG_APP)
+    acciones.pack(fill="x", pady=10)
+
+    def card_accion(titulo, icono, color, cmd):
+        card = tk.Frame(
+            acciones,
+            bg=BG_CARD,
+            padx=18, pady=16,
+            highlightthickness=1,
+            highlightbackground="#e5e7eb"
+        )
+        card.pack(side="left", padx=10)
+
+        tk.Label(card, text=icono,
+                 font=("Segoe UI Emoji", 22),
+                 bg=BG_CARD, fg=color).pack()
+
+        tk.Label(card, text=titulo,
+                 font=("Segoe UI", 11, "bold"),
+                 bg=BG_CARD, fg=TEXT).pack(pady=(6,0))
+
+        card.bind("<Button-1>", lambda e: cmd())
+        for child in card.winfo_children():
+            child.bind("<Button-1>", lambda e: cmd())
+
+    card_accion("Añadir material", "➕", "#16a34a", popup_add_material_global)
+    card_accion("Editar material", "✏️", "#2563eb", popup_edit_material)
+    card_accion("Eliminar material", "🗑️", "#dc2626", popup_delete_material)
+
+    panel = tk.Frame(content, bg=BG_CARD,
+                     highlightthickness=1,
+                     highlightbackground="#e5e7eb",
+                     padx=15, pady=15)
+    panel.pack(fill="both", expand=True, padx=10, pady=10)
+
+    global materiales_frame
+    materiales_frame = tk.Frame(panel, bg=BG_CARD)
+    materiales_frame.pack(fill="both", expand=True)
+
+    render_materiales()
+
 
 # SIDEBAR
 boton_activo = None
@@ -913,8 +1342,11 @@ def boton(txt, cmd):
     return btn
 
 boton("Visitas", pantalla_visitas).pack(fill="x")
+boton("Cuadrillas", pantalla_cuadrillas).pack(fill="x")
+boton("Materiales", pantalla_materiales).pack(fill="x")
 boton("Planificación", pantalla_planificacion).pack(fill="x")
 boton("Sistema Dinámico", pantalla_dinamico).pack(fill="x")
+
 
 
 # START
