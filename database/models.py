@@ -1,25 +1,45 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, UniqueConstraint
 from .session import Base
+
+
+class InstanciaSimulacionDB(Base):
+    __tablename__ = "instancias_simulacion"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String, nullable=True)
+    jornada_minutos = Column(Integer, nullable=False, default=1000)
+
 
 class VisitaDB(Base):
     __tablename__ = "visitas"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    instancia_id = Column(
+        Integer, ForeignKey("instancias_simulacion.id"), nullable=False, index=True
+    )
     tipo = Column(String)
     prioridad = Column(Integer)
     nombre = Column(String)
-
     latitud = Column(Float)
     longitud = Column(Float)
-
     duracion = Column(Integer)
+
 
 class MaterialDB(Base):
     __tablename__ = "materiales"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    nombre = Column(String, unique=True, nullable=False)
+    instancia_id = Column(
+        Integer, ForeignKey("instancias_simulacion.id"), nullable=False, index=True
+    )
+    nombre = Column(String, nullable=False)
     stock = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("instancia_id", "nombre", name="uq_material_instancia_nombre"),
+    )
+
 
 class VisitaMaterialDB(Base):
     __tablename__ = "visita_material"
@@ -28,15 +48,23 @@ class VisitaMaterialDB(Base):
     material_id = Column(Integer, ForeignKey("materiales.id"), primary_key=True)
     cantidad = Column(Integer, nullable=False)
 
+
 class CuadrillaDB(Base):
     __tablename__ = "cuadrillas"
 
+    instancia_id = Column(
+        Integer, ForeignKey("instancias_simulacion.id"), primary_key=True
+    )
     id = Column(Integer, primary_key=True)
     nombre = Column(String)
+
 
 class CuadrillaMaterialDB(Base):
     __tablename__ = "cuadrilla_material"
 
-    cuadrilla_id = Column(Integer, ForeignKey("cuadrillas.id"), primary_key=True)
+    instancia_id = Column(
+        Integer, ForeignKey("instancias_simulacion.id"), primary_key=True
+    )
+    cuadrilla_id = Column(Integer, primary_key=True)
     material_id = Column(Integer, ForeignKey("materiales.id"), primary_key=True)
     cantidad = Column(Integer, nullable=False)

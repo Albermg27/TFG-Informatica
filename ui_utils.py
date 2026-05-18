@@ -1,7 +1,14 @@
-def texto_visita(v):
-    materiales = ", ".join(
-        f"{m} x{cant}" for m, cant in v.materiales_necesarios.items()
-    ) or "Ninguno"
+def texto_visita(v, catalogo=None):
+    if catalogo:
+        from modelos import nombre_material
+        materiales = ", ".join(
+            f"{nombre_material(m_id, catalogo)} x{cant}"
+            for m_id, cant in v.materiales_necesarios.items()
+        ) or "Ninguno"
+    else:
+        materiales = ", ".join(
+            f"#{m_id} x{cant}" for m_id, cant in v.materiales_necesarios.items()
+        ) or "Ninguno"
 
     return (
         f"ID: {v.id}\n"
