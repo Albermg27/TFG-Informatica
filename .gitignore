@@ -1,3 +1,5 @@
 __pycache__/
 tfm.db
 mapa.html
+informe_casos_prueba.txt
+*.pyc

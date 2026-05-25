@@ -4,22 +4,25 @@ from tkinter import ttk
 from estado_dinamico import C, M
 from gui import theme
 from gui.context import AppContext
-from gui.helpers import etiqueta_material, id_desde_etiqueta, opciones_catalogo
+from gui.helpers import etiqueta_material, estado_cuadrilla_visual, id_desde_etiqueta, opciones_catalogo
 from gui.widgets import ScrollableFrame, modal_actions, page_header, section_card
 from modelos import nombre_material
 
 
-_cuadrillas_frame: tk.Frame | None = None
+class CuadrillasView:
+    def __init__(self) -> None:
+        self.ctx: AppContext | None = None
+        self.cuadrillas_frame: tk.Frame | None = None
 
 
-def _estado_visual(estado):
-    mapa = {
-        "DESPLAZANDOSE": ("🚚 Desplazándose", theme.PRIMARY),
-        "TRABAJANDO": ("🔧 Trabajando", theme.SUCCESS),
-        "LIBRE": ("🟡 Libre", theme.WARNING),
-        "INACTIVA": ("🏁 Finalizada", theme.DANGER),
-    }
-    return mapa.get(estado, ("⚪ Desconocido", theme.SUBTEXT))
+_vista: CuadrillasView | None = None
+
+
+def _v() -> CuadrillasView:
+    global _vista
+    if _vista is None:
+        _vista = CuadrillasView()
+    return _vista
 
 
 def _popup_agregar_material(ctx: AppContext, cuadrilla):
@@ -190,16 +193,16 @@ def _popup_consumir_material(ctx: AppContext, cuadrilla):
 
 
 def _render_cuadrillas():
-    global _cuadrillas_frame
-    if _cuadrillas_frame is None:
+    v = _v()
+    if v.cuadrillas_frame is None:
         return
 
-    for w in _cuadrillas_frame.winfo_children():
+    for w in v.cuadrillas_frame.winfo_children():
         w.destroy()
 
     if not C:
         tk.Label(
-            _cuadrillas_frame,
+            v.cuadrillas_frame,
             text="No hay cuadrillas activas.\nInicializa el sistema dinámico primero.",
             bg=theme.BG_CARD,
             fg=theme.SUBTEXT,
@@ -208,7 +211,7 @@ def _render_cuadrillas():
         ).pack()
         return
 
-    scroll = ScrollableFrame(_cuadrillas_frame, bg=theme.BG_CARD)
+    scroll = ScrollableFrame(v.cuadrillas_frame, bg=theme.BG_CARD)
     grid = scroll.frame
     cols = 2
     for col in range(cols):
@@ -216,7 +219,7 @@ def _render_cuadrillas():
 
     for i, c in enumerate(C):
         r, col = divmod(i, cols)
-        estado_txt, color = _estado_visual(c.estado.name)
+        estado_txt, color = estado_cuadrilla_visual(c.estado.name)
 
         card = tk.Frame(
             grid,
@@ -270,7 +273,7 @@ def _render_cuadrillas():
         tk.Button(
             acciones,
             text="➕ Añadir",
-            command=lambda cuad=c: _popup_agregar_material(_ctx_ref, cuad),
+            command=lambda cuad=c: _popup_agregar_material(_v().ctx, cuad),
             bg=theme.SUCCESS,
             fg="white",
             relief="flat",
@@ -283,7 +286,7 @@ def _render_cuadrillas():
         tk.Button(
             acciones,
             text="➖ Consumir",
-            command=lambda cuad=c: _popup_consumir_material(_ctx_ref, cuad),
+            command=lambda cuad=c: _popup_consumir_material(_v().ctx, cuad),
             bg=theme.BG_CARD,
             fg=theme.TEXT,
             relief="flat",
@@ -297,12 +300,9 @@ def _render_cuadrillas():
         ).pack(side="left")
 
 
-_ctx_ref: AppContext | None = None
-
-
 def mostrar(ctx: AppContext) -> None:
-    global _cuadrillas_frame, _ctx_ref
-    _ctx_ref = ctx
+    v = _v()
+    v.ctx = ctx
     ctx.limpiar()
 
     page_header(
@@ -312,5 +312,5 @@ def mostrar(ctx: AppContext) -> None:
     )
 
     body = section_card(ctx.content, "Cuadrillas en sistema")
-    _cuadrillas_frame = body
+    v.cuadrillas_frame = body
     _render_cuadrillas()

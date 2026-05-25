@@ -1,11 +1,13 @@
 import tkinter as tk
 from tkinter import ttk
 
-from estado_dinamico import C, D, M, ULTIMO_RESULTADO_ASIGNACION, V
+import estado_dinamico as estado
+from estado_dinamico import C, D, M, V
 from gui import theme
 from gui.context import AppContext
 from gui.helpers import (
     etiqueta_material,
+    estado_cuadrilla_visual,
     id_desde_etiqueta,
     materiales_necesarios_texto,
     materiales_texto,
@@ -24,15 +26,27 @@ from gui.widgets import (
 )
 from modelos import TipoVisita, Visita
 from sistema_dinamico import (
-    actualizar_stock,
     agregar_visita,
     asignacion_inicial_dinamica,
     cambiar_estado_cuadrilla,
+    cancelar_visita,
     terminar_sistema,
 )
 
-_estado_frame: tk.Frame | None = None
-_ctx_ref: AppContext | None = None
+class DinamicoView:
+    def __init__(self) -> None:
+        self.ctx: AppContext | None = None
+        self.estado_frame: tk.Frame | None = None
+
+
+_vista: DinamicoView | None = None
+
+
+def _v() -> DinamicoView:
+    global _vista
+    if _vista is None:
+        _vista = DinamicoView()
+    return _vista
 
 
 def _leer_tiempo(entry):
@@ -49,16 +63,6 @@ def _texto_ubicacion_cuadrilla(c):
     return f"Nodo {c.posicion}"
 
 
-def _estado_visual(estado):
-    mapa = {
-        "DESPLAZANDOSE": ("🚚 Desplazándose", theme.PRIMARY),
-        "TRABAJANDO": ("🔧 Trabajando", theme.SUCCESS),
-        "LIBRE": ("🟡 Libre", theme.WARNING),
-        "INACTIVA": ("🏁 Jornada finalizada", theme.DANGER),
-    }
-    return mapa.get(estado, ("⚪ Desconocido", theme.SUBTEXT))
-
-
 def _texto_historial(cuadrilla):
     if not cuadrilla.historial and not cuadrilla.ruta:
         return "Sin movimientos"
@@ -68,25 +72,20 @@ def _texto_historial(cuadrilla):
 
 
 def render_estado():
-    global _estado_frame
-    if _estado_frame is None:
+    v = _v()
+    if v.estado_frame is None:
         return
 
-    for w in _estado_frame.winfo_children():
+    for w in v.estado_frame.winfo_children():
         w.destroy()
 
-    stats = tk.Frame(_estado_frame, bg=theme.BG_CARD)
-    stats.pack(fill="x", pady=(0, 12))
-    stat_card(stats, "Visitas pendientes", len(V), "📋", theme.PRIMARY)
-    stat_card(stats, "Cuadrillas activas", len(C), "👷", theme.SUCCESS)
-
-    if ULTIMO_RESULTADO_ASIGNACION:
-        res = ULTIMO_RESULTADO_ASIGNACION
+    if estado.ULTIMO_RESULTADO_ASIGNACION:
+        res = estado.ULTIMO_RESULTADO_ASIGNACION
         ok = res.get("ok", False)
         banner_bg = theme.SUCCESS_LIGHT if ok else theme.WARNING_LIGHT
         banner_fg = theme.SUCCESS if ok else theme.WARNING
         tk.Label(
-            _estado_frame,
+            v.estado_frame,
             text=res.get("mensaje", ""),
             bg=banner_bg,
             fg=banner_fg,
@@ -99,7 +98,7 @@ def render_estado():
 
     if not C:
         tk.Label(
-            _estado_frame,
+            v.estado_frame,
             text="Inicializa la jornada para ver el estado de las cuadrillas",
             bg=theme.BG_CARD,
             fg=theme.SUBTEXT,
@@ -108,7 +107,7 @@ def render_estado():
         ).pack()
         return
 
-    scroll = ScrollableFrame(_estado_frame, bg=theme.BG_CARD)
+    scroll = ScrollableFrame(v.estado_frame, bg=theme.BG_CARD)
     grid = scroll.frame
     cols = 2
     for col in range(cols):
@@ -116,7 +115,7 @@ def render_estado():
 
     for i, c in enumerate(C):
         r, col = divmod(i, cols)
-        titulo, color_estado = _estado_visual(c.estado.name)
+        titulo, color_estado = estado_cuadrilla_visual(c.estado.name)
 
         card = tk.Frame(
             grid,
@@ -275,7 +274,7 @@ def _terminar_sistema_gui():
 
 
 def _formulario_visita():
-    win, parent = crear_modal_scrollable(_ctx_ref, "Nueva visita", 520, 640)
+    win, parent = crear_modal_scrollable(_v().ctx, "Nueva visita", 520, 640)
 
     card = tk.Frame(
         parent,
@@ -443,8 +442,19 @@ def _formulario_visita():
     )
 
 
-def _formulario_stock():
-    win, parent = crear_modal_scrollable(_ctx_ref, "Actualizar stock", 420, 380)
+def _opciones_cancelacion() -> dict[str, int]:
+    opciones: dict[str, int] = {}
+    for visita in sorted(V, key=lambda x: (-x.prioridad, x.nombre)):
+        opciones[f"Pendiente · {visita.nombre} · P{visita.prioridad}"] = visita.id
+    for cuadrilla in C:
+        visita = getattr(cuadrilla, "visita_actual", None)
+        if cuadrilla.estado.name == "DESPLAZANDOSE" and visita:
+            opciones[f"En ruta C{cuadrilla.id} · {visita.nombre} · P{visita.prioridad}"] = visita.id
+    return opciones
+
+
+def _formulario_cancelar_visita():
+    win, parent = crear_modal_scrollable(_v().ctx, "Cancelar visita", 460, 300)
 
     card = tk.Frame(
         parent,
@@ -458,56 +468,66 @@ def _formulario_stock():
 
     tk.Label(
         card,
-        text="Actualizar stock",
+        text="Cancelar visita",
         font=theme.FONT_HEADING,
         bg=theme.BG_CARD,
-        fg=theme.WARNING,
+        fg=theme.DANGER,
     ).pack(anchor="w")
     tk.Label(
         card,
-        text="Incrementar material disponible en almacén",
+        text="Elimina una visita pendiente o una visita asignada si la cuadrilla aún va de camino.",
         font=theme.FONT_BODY,
         bg=theme.BG_CARD,
         fg=theme.SUBTEXT,
+        wraplength=390,
+        justify="left",
     ).pack(anchor="w", pady=(4, 16))
 
-    tk.Label(card, text="Material", font=theme.FONT_SMALL, bg=theme.BG_CARD, fg=theme.SUBTEXT).pack(
-        anchor="w"
-    )
-    mat_var = tk.StringVar()
-    mat_combo = ttk.Combobox(
-        card, textvariable=mat_var, values=opciones_catalogo(), state="readonly"
-    )
-    mat_combo.pack(fill="x", ipady=4, pady=(4, 12))
-    if mat_combo["values"]:
-        mat_combo.current(0)
+    opciones = _opciones_cancelacion()
+    if not opciones:
+        tk.Label(
+            card,
+            text="No hay visitas cancelables en este momento.",
+            bg=theme.BG_CARD,
+            fg=theme.SUBTEXT,
+            font=theme.FONT_BODY,
+        ).pack(anchor="w", pady=(8, 0))
+        return
 
-    e_cant = campo_entrada(card, "Cantidad a añadir")
+    visita_var = tk.StringVar()
+    combo = ttk.Combobox(
+        card,
+        textvariable=visita_var,
+        values=list(opciones.keys()),
+        state="readonly",
+    )
+    combo.pack(fill="x", ipady=4, pady=(4, 12))
+    combo.current(0)
+
     msg = tk.Label(card, text="", bg=theme.BG_CARD, fg=theme.DANGER, font=theme.FONT_SMALL)
     msg.pack(pady=(8, 0))
 
     def aplicar():
-        try:
-            m_id = id_desde_etiqueta(mat_var.get())
-            if m_id is None:
-                msg.config(text="Selecciona un material")
-                return
-            if not actualizar_stock(m_id, int(e_cant.get())):
-                msg.config(text="Material no encontrado")
-                return
+        visita_id = opciones.get(visita_var.get())
+        if visita_id is None:
+            msg.config(text="Selecciona una visita")
+            return
+        resultado = cancelar_visita(visita_id)
+        if resultado != "ok":
+            msg.config(text="La visita no se puede cancelar en este estado")
             render_estado()
-            win.destroy()
-        except ValueError:
-            msg.config(text="Valores inválidos")
+            return
+        render_estado()
+        win.destroy()
 
     primary_button(
-        card, "Actualizar", aplicar, bg=theme.WARNING, activebackground="#b45309"
+        card, "Cancelar visita", aplicar, bg=theme.DANGER, activebackground="#b91c1c"
     ).pack(fill="x", pady=(16, 0))
 
 
 def mostrar(ctx: AppContext) -> None:
-    global _estado_frame, _ctx_ref
-    _ctx_ref = ctx
+    v = _v()
+    v.ctx = ctx
     ctx.limpiar()
 
     page_header(
@@ -520,9 +540,9 @@ def mostrar(ctx: AppContext) -> None:
     acciones.pack(fill="x", padx=24, pady=(0, 8))
     action_card(acciones, "Inicializar jornada", "▶", theme.PRIMARY, _refrescar_inicializar)
     action_card(acciones, "Añadir visita", "➕", theme.SUCCESS, _formulario_visita)
-    action_card(acciones, "Actualizar stock", "📦", theme.WARNING, _formulario_stock)
+    action_card(acciones, "Cancelar visita", "✕", theme.DANGER, _formulario_cancelar_visita)
     action_card(acciones, "Finalizar jornada", "⏹", theme.DANGER, _terminar_sistema_gui)
 
     body = section_card(ctx.content, "Estado en tiempo real")
-    _estado_frame = body
+    v.estado_frame = body
     render_estado()

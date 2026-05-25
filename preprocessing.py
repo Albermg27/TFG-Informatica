@@ -1,56 +1,56 @@
+from model import _par_factible
 from modelos import EstadoCuadrilla
 
-def filtrar_por_materiales(V_estrella, materiales):
-    V_final = []
-
-    for v in V_estrella:
-        if v.es_factible_materiales(materiales):
-            V_final.append(v)
-
-    return V_final
 
 def obtener_cuadrillas_libres(cuadrillas):
-    return [
-        c for c in cuadrillas if c.estado == EstadoCuadrilla.LIBRE
-    ]
+    return [c for c in cuadrillas if c.estado == EstadoCuadrilla.LIBRE]
 
-def filtrar_por_tiempo(V, C_estrella, D, J):
 
-    V_estrella = []
+def eliminar_visitas_imposibles_global(V, C, D, J, M, modo="estatico"):
 
-    for i, v in enumerate(V):
-        factible = False
+    V_filtradas = []
 
-        for c in C_estrella:
+    for v in V:
+        posible = False
 
-            tiempo_total = v.duracion + D[c.posicion][i]
+        for c in C:
+            if c.posicion not in D or v.id not in D[c.posicion]:
+                continue
+            tiempo = c.tiempo_acumulado + D[c.posicion][v.id] + v.duracion
+            if tiempo > J:
+                continue
 
-            if (c.tiempo_acumulado + tiempo_total) <= J:
-                factible = True
+            if modo == "dinamico":
+                mat_ok = v.es_factible_cuadrilla(c)
+            else:
+                mat_ok = v.es_factible_stock_global(M)
+
+            if mat_ok:
+                posible = True
                 break
 
-        if factible:
-            V_estrella.append(v)
+        if posible:
+            V_filtradas.append(v)
 
-    return V_estrella
-
-def filtrar_por_prioridad(V, max_visitas_modelo=10):
-    V_ordenadas = sorted(V, key=lambda v: v.prioridad, reverse=True)
-    return V_ordenadas[:max_visitas_modelo]
+    return V_filtradas
 
 
-def preprocesar(V, C, M, J, D):
+def filtrar_cuadrillas_operativas(V, C, D, J, M, modo="estatico"):
+    return [
+        c
+        for c in C
+        if any(_par_factible(v, c, D, J, modo, M) for v in V)
+    ]
+
+
+def preprocesar(V, C, M, J, D, modo="estatico"):
 
     C_estrella = obtener_cuadrillas_libres(C)
 
-    V_estrella = filtrar_por_tiempo(V, C_estrella, D, J)
+    V_estrella = eliminar_visitas_imposibles_global(V, C_estrella, D, J, M, modo)
 
-    V_estrella = filtrar_por_materiales(V_estrella, M)
+    C_estrella = filtrar_cuadrillas_operativas(V_estrella, C_estrella, D, J, M, modo)
 
-    V_estrella = filtrar_por_prioridad(V_estrella, 10)
-
-    if not V_estrella:
-        for c in C_estrella:
-            c.estado = EstadoCuadrilla.INACTIVA
+    V_estrella = eliminar_visitas_imposibles_global(V_estrella, C_estrella, D, J, M, modo)
 
     return V_estrella, C_estrella

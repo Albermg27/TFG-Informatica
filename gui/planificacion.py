@@ -21,28 +21,12 @@ def generar_planificacion(ctx: AppContext) -> None:
 def mostrar(ctx: AppContext) -> None:
     ctx.limpiar()
 
-    header = tk.Frame(ctx.content, bg=theme.BG_APP)
-    header.pack(fill="x", padx=24, pady=(20, 8))
-
-    col_titulo = tk.Frame(header, bg=theme.BG_APP)
-    col_titulo.pack(side="left", fill="x", expand=True)
-    tk.Label(
-        col_titulo,
-        text="Planificación de cuadrillas",
-        font=theme.FONT_TITLE,
-        bg=theme.BG_APP,
-        fg=theme.TEXT,
-    ).pack(anchor="w")
-    tk.Label(
-        col_titulo,
-        text="Genera rutas óptimas y consulta el detalle de cada cuadrilla",
-        font=theme.FONT_BODY,
-        bg=theme.BG_APP,
-        fg=theme.SUBTEXT,
-    ).pack(anchor="w", pady=(4, 0))
-
-    acciones = tk.Frame(header, bg=theme.BG_APP)
-    acciones.pack(side="right", padx=(12, 0))
+    header = page_header(
+        ctx.content,
+        "Planificación de cuadrillas",
+        "Genera rutas óptimas (plan estático de referencia). En Simulación se compara con el modelo dinámico.",
+    )
+    acciones = header._acciones
     primary_button(
         acciones,
         "  Generar planificación  ",

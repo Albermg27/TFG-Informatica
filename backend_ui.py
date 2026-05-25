@@ -1,3 +1,5 @@
+import copy
+
 from datos import cargar_datos
 from sistema_estatico import ejecutar_sistema_estatico
 
@@ -7,36 +9,46 @@ DATA = {
     "M": None,
     "params": None,
     "D": None,
-    "resultado_generado": False
+    "COORDS": None,
+    "resultado_generado": False,
 }
+
+PLAN_RESULTADO = {
+    "cuadrillas": None,
+    "log": None,
+}
+
 
 def cargar_visitas_gui():
     if DATA["V"] is None:
-        print("Cargando datos (solo una vez)")
-        V, C, M, params, D = cargar_datos()
+        V, C, M, params, D, coords, _K = cargar_datos()
         DATA["V"] = V
         DATA["C"] = C
         DATA["M"] = M
         DATA["params"] = params
         DATA["D"] = D
+        DATA["COORDS"] = coords
 
     return DATA["V"]
+
 
 def ejecutar_planificacion_gui():
     if DATA["V"] is None:
         cargar_visitas_gui()
 
-    resultado, C_final = ejecutar_sistema_estatico(
-        DATA["V"],
-        DATA["C"],
-        DATA["M"],
-        DATA["params"],
-        DATA["D"]
-    )
+    V = copy.deepcopy(DATA["V"])
+    C = copy.deepcopy(DATA["C"])
+    M = copy.deepcopy(DATA["M"])
+    D = copy.deepcopy(DATA["D"])
+    params = copy.deepcopy(DATA["params"])
 
-    DATA["C"] = C_final
+    resultado, C_final = ejecutar_sistema_estatico(V, C, M, params, D)
+
+    PLAN_RESULTADO["cuadrillas"] = C_final
+    PLAN_RESULTADO["log"] = resultado
     DATA["resultado_generado"] = True
     return resultado
 
+
 def obtener_cuadrillas():
-    return DATA["C"]
+    return PLAN_RESULTADO["cuadrillas"] or DATA["C"]

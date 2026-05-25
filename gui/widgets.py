@@ -37,8 +37,6 @@ def bind_mousewheel(canvas: tk.Canvas) -> None:
 
 
 class ScrollableFrame:
-    """Contenedor con scroll vertical y expansión horizontal."""
-
     def __init__(self, parent, bg=None, padx=0, pady=0, min_height: int = 0):
         self.bg = bg or theme.BG_APP
         self.outer = tk.Frame(parent, bg=self.bg)
@@ -79,17 +77,27 @@ def page_header(parent, titulo: str, subtitulo: str = "") -> tk.Frame:
     header = tk.Frame(parent, bg=theme.BG_APP)
     header.pack(fill="x", padx=24, pady=(20, 8))
 
+    row = tk.Frame(header, bg=theme.BG_APP)
+    row.pack(fill="x")
+
+    text_col = tk.Frame(row, bg=theme.BG_APP)
+    text_col.pack(side="left", fill="x", expand=True)
+
     tk.Label(
-        header, text=titulo, font=theme.FONT_TITLE, bg=theme.BG_APP, fg=theme.TEXT
+        text_col, text=titulo, font=theme.FONT_TITLE, bg=theme.BG_APP, fg=theme.TEXT
     ).pack(anchor="w")
     if subtitulo:
         tk.Label(
-            header,
+            text_col,
             text=subtitulo,
             font=theme.FONT_BODY,
             bg=theme.BG_APP,
             fg=theme.SUBTEXT,
         ).pack(anchor="w", pady=(4, 0))
+
+    acciones = tk.Frame(row, bg=theme.BG_APP)
+    acciones.pack(side="right", padx=(12, 0), anchor="n")
+    header._acciones = acciones  # type: ignore[attr-defined]
     return header
 
 
@@ -228,7 +236,6 @@ def modal_actions(
     show_cancel: bool = True,
     **submit_kwargs,
 ) -> tk.Frame:
-    """Barra de acciones fija al pie de un diálogo modal."""
     footer = tk.Frame(window, bg=theme.BG_APP)
     footer.pack(side="bottom", fill="x", padx=16, pady=16)
 

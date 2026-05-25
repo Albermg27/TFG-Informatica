@@ -1,7 +1,28 @@
 import re
+import tkinter as tk
 
 from modelos import nombre_material
 from estado_dinamico import M
+from gui import theme
+
+
+def widget_vivo(widget) -> bool:
+    if widget is None:
+        return False
+    try:
+        return bool(widget.winfo_exists())
+    except tk.TclError:
+        return False
+
+
+def estado_cuadrilla_visual(estado: str) -> tuple[str, str]:
+    mapa = {
+        "DESPLAZANDOSE": ("🚚 Desplazándose", theme.PRIMARY),
+        "TRABAJANDO": ("🔧 Trabajando", theme.SUCCESS),
+        "LIBRE": ("🟡 Libre", theme.WARNING),
+        "INACTIVA": ("🏁 Jornada finalizada", theme.DANGER),
+    }
+    return mapa.get(estado, ("⚪ Desconocido", theme.SUBTEXT))
 
 
 def etiqueta_material(m_id, catalogo=None):

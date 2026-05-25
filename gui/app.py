@@ -5,7 +5,7 @@ from sistema_dinamico import inicializar_sistema
 from gui import theme
 from gui.context import AppContext
 from gui.widgets import configurar_estilos_ttk
-from gui import visitas, cuadrillas, materiales, planificacion, dinamico, simulacion
+from gui import visitas, cuadrillas, materiales, planificacion, dinamico, simulacion, estadisticas
 
 PANTALLAS = {
     "visitas": visitas.mostrar,
@@ -14,6 +14,7 @@ PANTALLAS = {
     "planificacion": planificacion.mostrar,
     "dinamico": dinamico.mostrar,
     "simulacion": simulacion.mostrar,
+    "estadisticas": estadisticas.mostrar,
 }
 
 
@@ -33,10 +34,10 @@ def _crear_sidebar(ctx: AppContext, menu: tk.Frame) -> None:
         text="Gestión de cuadrillas",
         font=theme.FONT_SMALL,
         bg=theme.BG_MENU,
-        fg="#94a3b8",
+        fg=theme.NAV_MUTED,
     ).pack(anchor="w", pady=(2, 0))
 
-    tk.Frame(menu, bg="#334155", height=1).pack(fill="x", padx=16, pady=(0, 12))
+    tk.Frame(menu, bg=theme.NAV_DIVIDER, height=1).pack(fill="x", padx=16, pady=(0, 12))
 
     for titulo, icono, clave in theme.NAV_ITEMS:
         item = tk.Frame(menu, bg=theme.BG_MENU, cursor="hand2")
@@ -51,7 +52,7 @@ def _crear_sidebar(ctx: AppContext, menu: tk.Frame) -> None:
             text=icono,
             font=(theme.FONT_FAMILY, 14),
             bg=theme.BG_MENU,
-            fg="#cbd5e1",
+            fg=theme.NAV_FG,
         ).pack(side="left", padx=(0, 10))
 
         tk.Label(
@@ -59,7 +60,7 @@ def _crear_sidebar(ctx: AppContext, menu: tk.Frame) -> None:
             text=titulo,
             font=theme.FONT_BODY,
             bg=theme.BG_MENU,
-            fg="#cbd5e1",
+            fg=theme.NAV_FG,
         ).pack(side="left")
 
         def navegar(k=clave, cmd=PANTALLAS[clave]):
@@ -81,7 +82,7 @@ def _crear_sidebar(ctx: AppContext, menu: tk.Frame) -> None:
         text="TFG · Sistema de planificación",
         font=theme.FONT_CAPTION,
         bg=theme.BG_MENU,
-        fg="#475569",
+        fg=theme.NAV_FOOTER,
     ).pack(anchor="w")
 
 

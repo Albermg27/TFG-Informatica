@@ -18,6 +18,11 @@ SUBTEXT = "#64748b"
 BORDER = "#e2e8f0"
 BORDER_FOCUS = "#93c5fd"
 
+NAV_FG = "#cbd5e1"
+NAV_MUTED = "#94a3b8"
+NAV_DIVIDER = "#334155"
+NAV_FOOTER = "#475569"
+
 FONT_FAMILY = "Segoe UI"
 FONT_TITLE = (FONT_FAMILY, 22, "bold")
 FONT_HEADING = (FONT_FAMILY, 18, "bold")
@@ -44,4 +49,5 @@ NAV_ITEMS = [
     ("Planificación", "🗺", "planificacion"),
     ("Sistema Dinámico", "⚡", "dinamico"),
     ("Simulación", "🧪", "simulacion"),
+    ("Estadísticas", "📊", "estadisticas"),
 ]

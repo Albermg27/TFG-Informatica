@@ -35,7 +35,7 @@ class AppContext:
     @staticmethod
     def _aplicar_nav(frame: tk.Frame, activo: bool) -> None:
         bg = theme.PRIMARY if activo else theme.BG_MENU
-        fg = "white" if activo else "#cbd5e1"
+        fg = "white" if activo else theme.NAV_FG
         frame.configure(bg=bg)
         for child in frame.winfo_children():
             child.configure(bg=bg)

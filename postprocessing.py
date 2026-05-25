@@ -2,11 +2,10 @@ def postprocesar(asignaciones, V, C, materiales, D, dinamic):
     visitas_realizadas = []
 
     for visita, cuadrilla in asignaciones:
-
-        print(f"Cuadrilla {cuadrilla.id} -> Visita {visita.id}")
-
-        for m_id, cantidad in visita.materiales_necesarios.items():
-            materiales[m_id].consumir(cantidad)
+        
+        if not dinamic:
+            for m_id, cantidad in visita.materiales_necesarios.items():
+                materiales[m_id].consumir(cantidad)
 
         visita.asignada = True
         visitas_realizadas.append(visita)

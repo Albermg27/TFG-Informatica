@@ -13,7 +13,8 @@ class TipoVisita(Enum):
     ALMACEN = "almacen"
 
 class Material:
-    def __init__(self, nombre, cantidad_disponible):
+    def __init__(self, id, nombre, cantidad_disponible):
+        self.id = id
         self.nombre = nombre
         self.cantidad_disponible = cantidad_disponible
     
@@ -28,11 +29,16 @@ class Material:
 
 class Visita:
 
-    _next_id = 0
+    _next_id = 1
 
-    def __init__(self, tipo=TipoVisita, prioridad=0, materiales_visita={}, nombre="", latitud=0.0, longitud=0.0):
-        self.id = self._next_id
-        Visita._next_id += 1
+    def __init__(self, tipo=TipoVisita, prioridad=0, materiales_visita={}, nombre="", latitud=0.0, longitud=0.0, id=None):
+        if id is None:
+            self.id = Visita._next_id
+            Visita._next_id += 1
+        else:
+            self.id = id
+            if id >= Visita._next_id:
+                Visita._next_id = id + 1
         self.tipo = tipo
         self.prioridad = prioridad
         self.nombre = nombre
@@ -42,9 +48,18 @@ class Visita:
         self.materiales_necesarios = materiales_visita
         self.asignada = False
     
-    def es_factible_materiales(self, materiales):
-        for material, cantidad in self.materiales_necesarios.items():
-            if materiales[material].cantidad_disponible < cantidad:
+    def es_factible_stock_global(self, catalogo):
+        if not catalogo:
+            return True
+        for m_id, cantidad in self.materiales_necesarios.items():
+            material = catalogo.get(m_id)
+            if material is None or material.cantidad_disponible < cantidad:
+                return False
+        return True
+
+    def es_factible_cuadrilla(self, cuadrilla):
+        for m_id, cantidad in self.materiales_necesarios.items():
+            if cuadrilla.materiales.get(m_id, 0) < cantidad:
                 return False
         return True
 
@@ -76,7 +91,10 @@ class Cuadrilla:
         self.tiempo_desplazamiento = 0
         self.tiempo_trabajo = 0
         self.tiempo_estimado_viaje = 0
+        self.tiempo_jornada = 0.0
         self.materiales = materiales or {}
+        self.linea_tiempo: list[dict] = []
+        self._tramo_actual: dict | None = None
     
     def iniciar_desplazamiento(self, visita, tiempo_viaje):
         self.visita_actual = visita
@@ -152,12 +170,25 @@ class Cuadrilla:
                 else:
                     self.estado = EstadoCuadrilla.LIBRE
 
-    def consumir_materiales_cuadrilla(cuadrilla, visita):
-        for m_id, cantidad in visita.materiales_necesarios.items():
-            cuadrilla.materiales[m_id] -= cantidad
-
     def reset_dinamico(self):
         self.estado = EstadoCuadrilla.LIBRE
         self.ruta_actual = []
         self.tiempo_restante = 0
         self.visita_actual = None
+        self.tiempo_jornada = 0.0
+        self.linea_tiempo = []
+        self._tramo_actual = None
+
+
+def consumir_materiales_cuadrilla(cuadrilla, visita):
+    for m_id, cantidad in visita.materiales_necesarios.items():
+        restante = cuadrilla.materiales.get(m_id, 0) - cantidad
+        if restante <= 0:
+            cuadrilla.materiales.pop(m_id, None)
+        else:
+            cuadrilla.materiales[m_id] = restante
+
+
+def nombre_material(m_id, catalogo):
+    material = catalogo.get(m_id)
+    return material.nombre if material else f"Material {m_id}"
