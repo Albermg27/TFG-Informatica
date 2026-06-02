@@ -430,8 +430,7 @@ def _texto_instancia(inst) -> list[str]:
         f"({perfil.prob_cancelaciones_por_minuto * 100:.2f} %/min sim.) · "
         f"viaje {perfil.factor_viaje_min:.2f}–{perfil.factor_viaje_max:.2f}× · "
         f"trabajo {perfil.factor_trabajo_min:.2f}–{perfil.factor_trabajo_max:.2f}× · "
-        f"dispersión {perfil.dispersion_visitas * 100:.2f}% · "
-        f"atasco ×{_fmt_metrica(perfil.factor_atasco_matriz)}"
+        f"dispersión {perfil.dispersion_visitas * 100:.2f}%"
     )
     return lineas
 

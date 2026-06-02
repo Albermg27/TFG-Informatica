@@ -1,6 +1,8 @@
 from model import _par_factible
 from modelos import EstadoCuadrilla
 
+LIMITE_VISITAS_PRIORIDAD = 10
+
 
 def obtener_cuadrillas_libres(cuadrillas):
     return [c for c in cuadrillas if c.estado == EstadoCuadrilla.LIBRE]
@@ -43,6 +45,12 @@ def filtrar_cuadrillas_operativas(V, C, D, J, M, modo="estatico"):
     ]
 
 
+def filtrar_por_prioridad(V, limite=LIMITE_VISITAS_PRIORIDAD):
+    if len(V) <= limite:
+        return V
+    return sorted(V, key=lambda v: (-v.prioridad, v.nombre))[:limite]
+
+
 def preprocesar(V, C, M, J, D, modo="estatico"):
 
     C_estrella = obtener_cuadrillas_libres(C)
@@ -52,5 +60,9 @@ def preprocesar(V, C, M, J, D, modo="estatico"):
     C_estrella = filtrar_cuadrillas_operativas(V_estrella, C_estrella, D, J, M, modo)
 
     V_estrella = eliminar_visitas_imposibles_global(V_estrella, C_estrella, D, J, M, modo)
+
+    V_estrella = filtrar_por_prioridad(V_estrella)
+
+    C_estrella = filtrar_cuadrillas_operativas(V_estrella, C_estrella, D, J, M, modo)
 
     return V_estrella, C_estrella

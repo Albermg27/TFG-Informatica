@@ -66,7 +66,7 @@ def coords_desde_visitas(visitas):
     return {v.id: (v.latitud, v.longitud) for v in visitas}
 
 
-def enlazar_visita_matriz(D, coords, visita, factor_tiempo: float = 1.0):
+def enlazar_visita_matriz(D, coords, visita):
     nid = visita.id
     coords[nid] = (visita.latitud, visita.longitud)
     D[nid] = {}
@@ -84,7 +84,7 @@ def enlazar_visita_matriz(D, coords, visita, factor_tiempo: float = 1.0):
             D[nid][nid] = 0.0
             continue
         base = mins[i_n][idx[oid]]
-        dur = round(base * factor_tiempo, 1)
+        dur = round(base, 1)
         D[nid][oid] = dur
         if oid not in D:
             D[oid] = {}
@@ -92,8 +92,8 @@ def enlazar_visita_matriz(D, coords, visita, factor_tiempo: float = 1.0):
     return D
 
 
-def actualizar_matriz_distancias(D, coords, nueva_visita, factor_tiempo: float = 1.0):
-    return enlazar_visita_matriz(D, coords, nueva_visita, factor_tiempo=factor_tiempo)
+def actualizar_matriz_distancias(D, coords, nueva_visita):
+    return enlazar_visita_matriz(D, coords, nueva_visita)
 
 
 _cache_matriz_instancia: dict[int, tuple[dict, dict, dict]] = {}

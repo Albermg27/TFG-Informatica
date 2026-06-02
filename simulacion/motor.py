@@ -313,12 +313,7 @@ class MotorSimulacion:
         elif self._rng.random() < 0.30 and self.M:
             mid = self._rng.choice(list(self.M.keys()))
             visita.materiales_necesarios = {mid: 1}
-        enlazar_visita_matriz(
-            self.D,
-            self.COORDS,
-            visita,
-            factor_tiempo=p.factor_atasco_matriz,
-        )
+        enlazar_visita_matriz(self.D, self.COORDS, visita)
         self.K = matriz_km_osrm_desde_coords(
             self.COORDS,
             contexto=f"urgente id={visita.id}",
