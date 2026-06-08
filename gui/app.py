@@ -19,26 +19,6 @@ PANTALLAS = {
 
 
 def _crear_sidebar(ctx: AppContext, menu: tk.Frame) -> None:
-    brand = tk.Frame(menu, bg=theme.BG_MENU)
-    brand.pack(fill="x", pady=(24, 20), padx=16)
-
-    tk.Label(
-        brand,
-        text="⚡ Planificador",
-        font=(theme.FONT_FAMILY, 15, "bold"),
-        bg=theme.BG_MENU,
-        fg="white",
-    ).pack(anchor="w")
-    tk.Label(
-        brand,
-        text="Gestión de cuadrillas",
-        font=theme.FONT_SMALL,
-        bg=theme.BG_MENU,
-        fg=theme.NAV_MUTED,
-    ).pack(anchor="w", pady=(2, 0))
-
-    tk.Frame(menu, bg=theme.NAV_DIVIDER, height=1).pack(fill="x", padx=16, pady=(0, 12))
-
     for titulo, icono, clave in theme.NAV_ITEMS:
         item = tk.Frame(menu, bg=theme.BG_MENU, cursor="hand2")
         item.pack(fill="x", padx=8, pady=2)
@@ -79,7 +59,7 @@ def _crear_sidebar(ctx: AppContext, menu: tk.Frame) -> None:
     footer.pack(side="bottom", fill="x", pady=16, padx=16)
     tk.Label(
         footer,
-        text="TFG · Sistema de planificación",
+        text="",
         font=theme.FONT_CAPTION,
         bg=theme.BG_MENU,
         fg=theme.NAV_FOOTER,
