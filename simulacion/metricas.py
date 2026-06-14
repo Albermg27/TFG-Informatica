@@ -9,6 +9,13 @@ from statistics import mean, pstdev
 from database.repository import get_cuadrillas_db, get_instancias_db, get_visitas_db
 from database.seed import INSTANCIAS_META
 from simulacion.config_instancia import perfil_simulacion
+from simulacion.estrategias_asignacion import (
+    ESTRATEGIA_MILP,
+    ESTRATEGIAS_DISPONIBLES,
+    ETIQUETAS_ESTRATEGIA,
+    etiqueta_estrategia,
+)
+from simulacion.guion_eventos import GuionEventos, generar_guion_eventos
 from simulacion.plan_estatico import evaluar_planificacion_estatica
 
 REPETICIONES_POR_INSTANCIA = 5
@@ -65,7 +72,18 @@ GLOSARIO_METRICAS = [
         "Diferencia por ejecución: positivo en km indica más desplazamiento; en visitas "
         "completadas negativo indica menos servicio que el plan inicial.",
     ),
+    (
+        "Tiempo de resolución de asignación",
+        "Suma del tiempo de CPU dedicado a resolver cada oleada (MILP con Gurobi o heurística). "
+        "No incluye consultas OSRM ni la simulación temporal de la jornada.",
+    ),
 ]
+
+CAMPOS_TIEMPO_ASIGNACION = (
+    "resoluciones_asignacion",
+    "tiempo_asignacion_total_s",
+    "tiempo_asignacion_medio_ms",
+)
 
 CAMPOS_ENTEROS = frozenset(
     {
@@ -75,6 +93,7 @@ CAMPOS_ENTEROS = frozenset(
         "visitas_generadas",
         "visitas_canceladas",
         "eventos_totales",
+        "resoluciones_asignacion",
     }
 )
 
@@ -393,6 +412,11 @@ def _semilla_ejecucion(instancia_id: int, repeticion: int) -> int:
     return instancia_id * 17 + repeticion * 1009
 
 
+def _semilla_plan_estatico(instancia_id: int, estrategia: str) -> int:
+    base = sum(ord(ch) for ch in estrategia)
+    return instancia_id * 7919 + base * 101
+
+
 def _meta_seed_instancia(instancia_id: int) -> tuple | None:
     if 1 <= instancia_id <= len(INSTANCIAS_META):
         return INSTANCIAS_META[instancia_id - 1]
@@ -474,6 +498,12 @@ def _promediar_resumenes(resumenes: list[dict]) -> dict:
     if resumenes:
         resultado["jornada_minutos"] = resumenes[0].get("jornada_minutos", resultado.get("jornada_minutos", 0))
         resultado["modo"] = resumenes[0].get("modo", "dinamico")
+    for campo in CAMPOS_TIEMPO_ASIGNACION:
+        valores = [r.get(campo, 0) for r in resumenes]
+        if campo == "resoluciones_asignacion":
+            resultado[campo] = int(round(mean(valores))) if valores else 0
+        else:
+            resultado[campo] = _redondear_metrica(mean(valores)) if valores else 0
     return resultado
 
 
@@ -550,6 +580,9 @@ def _formatear_resumen(resumen: dict, prefijo: str = "  ", titulo_modo: str | No
         "visitas_generadas": "Visitas generadas (dinámicas)",
         "visitas_canceladas": "Visitas canceladas",
         "eventos_totales": "Eventos totales",
+        "resoluciones_asignacion": "Resoluciones de asignacion",
+        "tiempo_asignacion_total_s": "Tiempo total de asignacion (s)",
+        "tiempo_asignacion_medio_ms": "Tiempo medio por resolucion (ms)",
     }
     lineas = []
     if titulo_modo:
@@ -557,6 +590,9 @@ def _formatear_resumen(resumen: dict, prefijo: str = "  ", titulo_modo: str | No
     for campo in CAMPOS_RESUMEN:
         valor = resumen.get(campo, 0)
         lineas.append(f"{prefijo}{etiquetas[campo]}: {_fmt_metrica(valor)}")
+    for campo in CAMPOS_TIEMPO_ASIGNACION:
+        if campo in resumen:
+            lineas.append(f"{prefijo}{etiquetas[campo]}: {_fmt_metrica(resumen[campo])}")
     tiempos = resumen.get("tiempos_cuadrillas") or {}
     if tiempos:
         lineas.append(f"{prefijo}Tiempos cuadrillas (fin última visita, min):")
@@ -588,79 +624,143 @@ def ejecutar_bateria_casos_prueba(
     ]
     instancias.sort(key=lambda x: x.id)
 
+    estrategias = list(ESTRATEGIAS_DISPONIBLES)
     motor = MotorSimulacion(on_actualizar=None)
     resultados_instancia: list[dict] = []
-    todos_dinamicos: list[dict] = []
-    todos_estaticos: list[dict] = []
-    total_pasos = len(instancias) * (repeticiones + 1)
+    todos_dinamicos_por_estrategia: dict[str, list[dict]] = {
+        e: [] for e in estrategias
+    }
+    todos_estaticos_por_estrategia: dict[str, list[dict]] = {
+        e: [] for e in estrategias
+    }
+    total_pasos = len(instancias) * len(estrategias) * (repeticiones + 1)
     ejecutadas = 0
 
     for inst in instancias:
-        if on_progreso:
-            ejecutadas += 1
-            on_progreso(ejecutadas, total_pasos, inst.id, 0)
-
-        try:
-            plan_estatico = copy.deepcopy(
-                evaluar_planificacion_estatica(inst.id, silent=True)
-            )
-        except Exception as exc:
-            from osrm_client import OSRMError
-
-            if isinstance(exc, OSRMError):
-                raise OSRMError(f"Instancia {inst.id} (plan estático): {exc}") from exc
-            raise
-        todos_estaticos.append(plan_estatico)
-
-        repeticiones_data: list[dict] = []
+        guiones_por_repeticion: dict[int, GuionEventos] = {}
         for rep in range(1, repeticiones + 1):
             semilla = _semilla_ejecucion(inst.id, rep)
+            guiones_por_repeticion[rep] = generar_guion_eventos(inst.id, semilla)
+
+        estrategias_instancia: dict[str, dict] = {}
+        for estrategia in estrategias:
+            if on_progreso:
+                ejecutadas += 1
+                on_progreso(ejecutadas, total_pasos, inst.id, 0)
+
             try:
-                motor.cargar_instancia(inst.id, semilla=semilla)
-                dinamico = copy.deepcopy(motor.simular_hasta_fin())
+                plan_estatico = copy.deepcopy(
+                    evaluar_planificacion_estatica(
+                        inst.id,
+                        silent=True,
+                        estrategia=estrategia,
+                        semilla_aleatoria=_semilla_plan_estatico(inst.id, estrategia),
+                    )
+                )
             except Exception as exc:
                 from osrm_client import OSRMError
 
                 if isinstance(exc, OSRMError):
                     raise OSRMError(
-                        f"Instancia {inst.id}, repetición {rep}: {exc}"
+                        f"Instancia {inst.id} (plan estático, {estrategia}): {exc}"
                     ) from exc
                 raise
-            comparacion = _comparar_estatico_dinamico(plan_estatico, dinamico)
-            repeticiones_data.append(
-                {
-                    "repeticion": rep,
-                    "semilla": semilla,
-                    "estatico": plan_estatico,
-                    "dinamico": dinamico,
-                    "comparacion": comparacion,
-                }
-            )
-            todos_dinamicos.append(dinamico)
-            ejecutadas += 1
-            if on_progreso:
-                on_progreso(ejecutadas, total_pasos, inst.id, rep)
+            todos_estaticos_por_estrategia[estrategia].append(plan_estatico)
 
-        media_dyn = _promediar_resumenes([r["dinamico"] for r in repeticiones_data])
-        media_comp = _promediar_comparaciones([r["comparacion"] for r in repeticiones_data])
-        resultados_instancia.append(
-            {
-                "instancia": inst,
+            repeticiones_data: list[dict] = []
+            for rep in range(1, repeticiones + 1):
+                semilla = _semilla_ejecucion(inst.id, rep)
+                try:
+                    motor.cargar_instancia(
+                        inst.id,
+                        semilla=semilla,
+                        estrategia_asignacion=estrategia,
+                        guion_eventos=guiones_por_repeticion[rep],
+                    )
+                    dinamico = copy.deepcopy(motor.simular_hasta_fin())
+                except Exception as exc:
+                    from osrm_client import OSRMError
+
+                    if isinstance(exc, OSRMError):
+                        raise OSRMError(
+                            f"Instancia {inst.id}, repetición {rep}, estrategia {estrategia}: {exc}"
+                        ) from exc
+                    raise
+                comparacion = _comparar_estatico_dinamico(plan_estatico, dinamico)
+                repeticiones_data.append(
+                    {
+                        "repeticion": rep,
+                        "semilla": semilla,
+                        "estatico": plan_estatico,
+                        "dinamico": dinamico,
+                        "comparacion": comparacion,
+                        "estrategia": estrategia,
+                    }
+                )
+                todos_dinamicos_por_estrategia[estrategia].append(dinamico)
+                ejecutadas += 1
+                if on_progreso:
+                    on_progreso(ejecutadas, total_pasos, inst.id, rep)
+
+            media_dyn = _promediar_resumenes([r["dinamico"] for r in repeticiones_data])
+            media_comp = _promediar_comparaciones(
+                [r["comparacion"] for r in repeticiones_data]
+            )
+            estrategias_instancia[estrategia] = {
                 "plan_estatico": plan_estatico,
                 "repeticiones": repeticiones_data,
                 "media_dinamico": media_dyn,
                 "media_comparacion": media_comp,
             }
+
+        milp_data = estrategias_instancia.get(ESTRATEGIA_MILP) or {}
+        resultados_instancia.append(
+            {
+                "instancia": inst,
+                "estrategias": estrategias_instancia,
+                # Compatibilidad con el formato previo (vista por defecto: MILP)
+                "plan_estatico": milp_data.get("plan_estatico", {}),
+                "repeticiones": milp_data.get("repeticiones", []),
+                "media_dinamico": milp_data.get("media_dinamico", {}),
+                "media_comparacion": milp_data.get("media_comparacion", {}),
+            }
         )
+
+    media_global_por_estrategia: dict[str, dict] = {}
+    for estrategia in estrategias:
+        estaticos = todos_estaticos_por_estrategia[estrategia]
+        dinamicos = todos_dinamicos_por_estrategia[estrategia]
+        media_global_por_estrategia[estrategia] = {
+            "estatico": _promediar_resumenes(estaticos),
+            "dinamico": _promediar_resumenes(dinamicos),
+            "total_ejecuciones_dinamicas": len(dinamicos),
+            "total_planes_estaticos": len(estaticos),
+        }
+
+    global_milp = media_global_por_estrategia.get(ESTRATEGIA_MILP, {})
+    total_dinamicos = sum(
+        x["total_ejecuciones_dinamicas"] for x in media_global_por_estrategia.values()
+    )
+    total_estaticos = sum(
+        x["total_planes_estaticos"] for x in media_global_por_estrategia.values()
+    )
 
     return {
         "fecha": datetime.now(),
         "repeticiones": repeticiones,
+        "estrategias": estrategias,
+        "etiquetas_estrategia": dict(ETIQUETAS_ESTRATEGIA),
         "instancias": resultados_instancia,
-        "media_global_estatico": _promediar_resumenes(todos_estaticos),
-        "media_global_dinamico": _promediar_resumenes(todos_dinamicos),
-        "total_ejecuciones_dinamicas": len(todos_dinamicos),
-        "total_planes_estaticos": len(todos_estaticos),
+        "media_global_por_estrategia": media_global_por_estrategia,
+        # Compatibilidad con el formato previo (global por defecto: MILP)
+        "media_global_estatico": global_milp.get(
+            "estatico", _promediar_resumenes([])
+        ),
+        "media_global_dinamico": global_milp.get(
+            "dinamico", _promediar_resumenes([])
+        ),
+        "total_ejecuciones_dinamicas": total_dinamicos,
+        "total_planes_estaticos": total_estaticos,
     }
 
 
@@ -669,21 +769,22 @@ def generar_informe_txt(datos: dict) -> str:
     fecha = datos["fecha"]
     rep = datos["repeticiones"]
     n_inst = len(datos["instancias"])
-    n_dyn = datos["total_ejecuciones_dinamicas"]
+    estrategias = list(datos.get("estrategias") or ESTRATEGIAS_DISPONIBLES)
+    n_dyn = datos.get("total_ejecuciones_dinamicas", 0)
 
     lineas.extend(
         [
             "=" * 72,
-            "INFORME DE CASOS DE PRUEBA — PLAN ESTÁTICO vs SIMULACIÓN DINÁMICA",
+            "INFORME DE CASOS DE PRUEBA — COMPARATIVA POR ESTRATEGIA",
             "=" * 72,
             f"Generado: {fecha.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"Configuración: {n_inst} instancias · {rep} repeticiones dinámicas · "
-            f"1 plan estático por instancia",
-            f"Total ejecuciones dinámicas: {n_dyn}",
+            f"Configuración: {n_inst} instancias · {len(estrategias)} estrategias · "
+            f"{rep} repeticiones dinámicas por estrategia",
+            "Estrategias: " + ", ".join(etiqueta_estrategia(x) for x in estrategias),
+            f"Total ejecuciones dinámicas: {n_dyn} (sumando todas las estrategias)",
             "",
-            "Por instancia se calcula primero un plan estático (como Planificación: rutas "
-            "con tiempos estimados, sin eventos). Después se simula la jornada dinámica con "
-            "replanificación, tiempos reales, visitas urgentes y cancelaciones según el perfil del caso.",
+            "Para cada instancia se calcula un plan estatico por estrategia y despues se "
+            "simula la jornada dinamica con la misma estrategia de asignacion.",
             "Tiempos de desplazamiento (plan y simulación): matriz OSRM por carretera; "
             "cada visita urgente nueva consulta OSRM (peticiones espaciadas). Si OSRM falla, "
             "la batería se aborta.",
@@ -702,120 +803,199 @@ def generar_informe_txt(datos: dict) -> str:
 
     for bloque in datos["instancias"]:
         inst = bloque["instancia"]
+        estrategias_bloque = bloque.get("estrategias") or {
+            ESTRATEGIA_MILP: {
+                "plan_estatico": bloque.get("plan_estatico", {}),
+                "repeticiones": bloque.get("repeticiones", []),
+                "media_dinamico": bloque.get("media_dinamico", {}),
+                "media_comparacion": bloque.get("media_comparacion", {}),
+            }
+        }
         lineas.append("=" * 72)
         lineas.append(f"INSTANCIA {inst.id}: {inst.nombre}")
         lineas.append("=" * 72)
         lineas.extend(_texto_instancia(inst))
         lineas.append("")
 
-        plan = bloque["plan_estatico"]
-        lineas.append("--- Plan estático (referencia, una vez por instancia) ---")
-        lineas.append(_formatear_resumen(plan))
-        stock = plan.get("stock_inicial_cuadrillas", {})
-        if stock:
-            lineas.append("  Material inicial por cuadrilla (plan + margen):")
-            for cid in sorted(stock):
-                items = ", ".join(f"id{m}×{q}" for m, q in sorted(stock[cid].items()))
-                lineas.append(f"    Cuadrilla {cid}: {items or '(sin material)'}")
-        lineas.append("  Cronología planificada (viaje + servicio):")
-        lineas.append(
-            _formatear_rutas(
-                plan.get("rutas"),
-                plan.get("cronologia_cuadrillas"),
-                prefijo="    ",
-                jornada=plan.get("jornada_minutos"),
-            )
-        )
-        lineas.append(
-            "    "
-            + formatear_lista_pendientes(plan.get("pendientes_nombres")).replace("\n", "\n    ")
-        )
-        lineas.append("")
-
-        for rep_data in bloque["repeticiones"]:
-            r = rep_data["repeticion"]
-            s = rep_data["semilla"]
-            dyn = rep_data["dinamico"]
-            lineas.append(f"--- Ejecución dinámica {r}/{rep} (semilla {s}) ---")
-            lineas.append(_formatear_resumen(dyn))
-            lineas.append("  Cronología ejecutada (viaje + servicio):")
+        for estrategia in estrategias:
+            datos_estrategia = estrategias_bloque.get(estrategia)
+            if not datos_estrategia:
+                continue
+            plan = datos_estrategia["plan_estatico"]
+            reps = datos_estrategia["repeticiones"]
+            lineas.append("-" * 72)
+            lineas.append(f"Estrategia: {etiqueta_estrategia(estrategia)}")
+            lineas.append("-" * 72)
+            lineas.append("--- Plan estatico (referencia) ---")
+            lineas.append(_formatear_resumen(plan))
+            stock = plan.get("stock_inicial_cuadrillas", {})
+            if stock:
+                lineas.append("  Material inicial por cuadrilla (plan + margen):")
+                for cid in sorted(stock):
+                    items = ", ".join(f"id{m}×{q}" for m, q in sorted(stock[cid].items()))
+                    lineas.append(f"    Cuadrilla {cid}: {items or '(sin material)'}")
+            lineas.append("  Cronologia planificada (viaje + servicio):")
             lineas.append(
                 _formatear_rutas(
-                    dyn.get("rutas"),
-                    dyn.get("cronologia_cuadrillas"),
+                    plan.get("rutas"),
+                    plan.get("cronologia_cuadrillas"),
                     prefijo="    ",
-                    jornada=dyn.get("jornada_minutos") or plan.get("jornada_minutos"),
+                    jornada=plan.get("jornada_minutos"),
                 )
             )
             lineas.append(
                 "    "
-                + formatear_lista_pendientes(dyn.get("pendientes_nombres")).replace(
+                + formatear_lista_pendientes(plan.get("pendientes_nombres")).replace(
+                    "\n", "\n    "
+                )
+            )
+            lineas.append("")
+
+            for rep_data in reps:
+                r = rep_data["repeticion"]
+                s = rep_data["semilla"]
+                dyn = rep_data["dinamico"]
+                lineas.append(f"--- Ejecucion dinamica {r}/{rep} (semilla {s}) ---")
+                lineas.append(_formatear_resumen(dyn))
+                lineas.append("  Cronologia ejecutada (viaje + servicio):")
+                lineas.append(
+                    _formatear_rutas(
+                        dyn.get("rutas"),
+                        dyn.get("cronologia_cuadrillas"),
+                        prefijo="    ",
+                        jornada=dyn.get("jornada_minutos") or plan.get("jornada_minutos"),
+                    )
+                )
+                lineas.append(
+                    "    "
+                    + formatear_lista_pendientes(dyn.get("pendientes_nombres")).replace(
+                        "\n", "\n    "
+                    )
+                )
+                lineas.append(
+                    "    "
+                    + formatear_lista_canceladas(dyn.get("canceladas_nombres")).replace(
+                        "\n", "\n    "
+                    )
+                )
+                lineas.append("")
+                lineas.append("  Comparacion frente al plan estatico:")
+                lineas.append(_formatear_comparacion(rep_data["comparacion"], prefijo="    "))
+                lineas.append("")
+
+            lineas.append(
+                f"--- Media dinamica ({len(reps)} ejecuciones) · {etiqueta_estrategia(estrategia)} ---"
+            )
+            lineas.append(_formatear_resumen(datos_estrategia["media_dinamico"]))
+            media_dyn = datos_estrategia["media_dinamico"]
+            lineas.append("")
+            lineas.append("  Cronologia media ejecutada (viaje + servicio, media por visita):")
+            lineas.append(
+                _formatear_rutas(
+                    media_dyn.get("rutas"),
+                    media_dyn.get("cronologia_cuadrillas"),
+                    prefijo="    ",
+                    jornada=media_dyn.get("jornada_minutos") or plan.get("jornada_minutos"),
+                )
+            )
+            lineas.append(
+                "    "
+                + formatear_lista_pendientes(media_dyn.get("pendientes_nombres")).replace(
                     "\n", "\n    "
                 )
             )
             lineas.append(
                 "    "
-                + formatear_lista_canceladas(dyn.get("canceladas_nombres")).replace(
+                + formatear_lista_canceladas(media_dyn.get("canceladas_nombres")).replace(
                     "\n", "\n    "
                 )
             )
             lineas.append("")
-            lineas.append("  Comparación frente al plan estático:")
-            lineas.append(_formatear_comparacion(rep_data["comparacion"], prefijo="    "))
+            lineas.append("  Media de comparacion (dinamico - estatico):")
+            lineas.append(
+                _formatear_comparacion(datos_estrategia["media_comparacion"], prefijo="    ")
+            )
+            if len(reps) >= 2:
+                lineas.append("")
+                lineas.append("  Desviacion tipica en dinamico (entre ejecuciones):")
+                for campo in ("visitas_completadas", "distancia_total_km"):
+                    sigma = _desviacion_estandar([x["dinamico"] for x in reps], campo)
+                    lineas.append(f"    {campo}: sigma = {_fmt_metrica(sigma)}")
             lineas.append("")
-
-        reps = bloque["repeticiones"]
-        lineas.append(f"--- Media dinámica instancia {inst.id} ({len(reps)} ejecuciones) ---")
-        lineas.append(_formatear_resumen(bloque["media_dinamico"]))
-        media_dyn = bloque["media_dinamico"]
-        lineas.append("")
-        lineas.append("  Cronología media ejecutada (viaje + servicio, media por visita):")
-        lineas.append(
-            _formatear_rutas(
-                media_dyn.get("rutas"),
-                media_dyn.get("cronologia_cuadrillas"),
-                prefijo="    ",
-                jornada=media_dyn.get("jornada_minutos") or plan.get("jornada_minutos"),
-            )
-        )
-        lineas.append(
-            "    "
-            + formatear_lista_pendientes(media_dyn.get("pendientes_nombres")).replace(
-                "\n", "\n    "
-            )
-        )
-        lineas.append(
-            "    "
-            + formatear_lista_canceladas(media_dyn.get("canceladas_nombres")).replace(
-                "\n", "\n    "
-            )
-        )
-        lineas.append("")
-        lineas.append("  Media de comparación (dinámico − estático):")
-        lineas.append(_formatear_comparacion(bloque["media_comparacion"], prefijo="    "))
-        if len(reps) >= 2:
-            lineas.append("")
-            lineas.append("  Desviación típica en dinámico (entre ejecuciones):")
-            for campo in ("visitas_completadas", "distancia_total_km"):
-                sigma = _desviacion_estandar([x["dinamico"] for x in reps], campo)
-                lineas.append(f"    {campo}: σ = {_fmt_metrica(sigma)}")
         lineas.append("")
 
     lineas.append("=" * 72)
-    lineas.append("RESUMEN GLOBAL")
+    lineas.append("RESUMEN GLOBAL POR ESTRATEGIA")
     lineas.append("=" * 72)
-    lineas.append("Plan estático (media entre instancias):")
-    lineas.append(_formatear_resumen(datos["media_global_estatico"], prefijo="  "))
-    lineas.append("")
-    lineas.append(f"Simulación dinámica (media de {n_dyn} ejecuciones):")
-    lineas.append(_formatear_resumen(datos["media_global_dinamico"], prefijo="  "))
-    comp_global = _comparar_estatico_dinamico(
-        datos["media_global_estatico"], datos["media_global_dinamico"]
-    )
-    lineas.append("")
-    lineas.append("Comparación global (dinámico − estático):")
-    lineas.append(_formatear_comparacion(comp_global, prefijo="  "))
-    lineas.append("")
+    medias_globales = datos.get("media_global_por_estrategia") or {}
+    for estrategia in estrategias:
+        resumen_estrategia = medias_globales.get(estrategia, {})
+        est = resumen_estrategia.get("estatico", {})
+        dyn = resumen_estrategia.get("dinamico", {})
+        n_dyn_estrategia = resumen_estrategia.get("total_ejecuciones_dinamicas", 0)
+        lineas.append(f"Estrategia: {etiqueta_estrategia(estrategia)}")
+        lineas.append("  Plan estatico (media entre instancias):")
+        lineas.append(_formatear_resumen(est, prefijo="    "))
+        lineas.append("")
+        lineas.append(
+            f"  Simulacion dinamica (media de {n_dyn_estrategia} ejecuciones):"
+        )
+        lineas.append(_formatear_resumen(dyn, prefijo="    "))
+        comp_global = _comparar_estatico_dinamico(est, dyn)
+        lineas.append("")
+        lineas.append("  Comparacion global (dinamico - estatico):")
+        lineas.append(_formatear_comparacion(comp_global, prefijo="    "))
+        lineas.append("")
+
+    if ESTRATEGIA_MILP in medias_globales:
+        lineas.append("-" * 72)
+        lineas.append("MEJORA DEL MILP FRENTE A BASELINES (MEDIA DINAMICA GLOBAL)")
+        lineas.append("-" * 72)
+        dyn_milp = medias_globales[ESTRATEGIA_MILP].get("dinamico", {})
+        for estrategia in estrategias:
+            if estrategia == ESTRATEGIA_MILP or estrategia not in medias_globales:
+                continue
+            dyn_base = medias_globales[estrategia].get("dinamico", {})
+            d_base = float(dyn_base.get("distancia_total_km", 0) or 0)
+            d_milp = float(dyn_milp.get("distancia_total_km", 0) or 0)
+            v_base = float(dyn_base.get("visitas_completadas", 0) or 0)
+            v_milp = float(dyn_milp.get("visitas_completadas", 0) or 0)
+            mejora_km = ((d_base - d_milp) / d_base * 100.0) if d_base else 0.0
+            mejora_visitas = ((v_milp - v_base) / v_base * 100.0) if v_base else 0.0
+            lineas.append(
+                f"vs {etiqueta_estrategia(estrategia)}: "
+                f"distancia {mejora_km:+.2f}% · visitas completadas {mejora_visitas:+.2f}%"
+            )
+        lineas.append("")
+
+    if medias_globales:
+        lineas.append("-" * 72)
+        lineas.append("COSTE COMPUTACIONAL DE ASIGNACION (MEDIA GLOBAL)")
+        lineas.append("-" * 72)
+        lineas.append(
+            "Tiempos de CPU en el nucleo de asignacion por oleada (sin OSRM ni simulacion temporal)."
+        )
+        lineas.append("")
+        for estrategia in estrategias:
+            resumen_estrategia = medias_globales.get(estrategia, {})
+            est = resumen_estrategia.get("estatico", {})
+            dyn = resumen_estrategia.get("dinamico", {})
+            lineas.append(f"Estrategia: {etiqueta_estrategia(estrategia)}")
+            lineas.append(
+                "  Plan estatico — "
+                f"resoluciones: {est.get('resoluciones_asignacion', 0)} · "
+                f"total: {est.get('tiempo_asignacion_total_s', 0)} s · "
+                f"medio: {est.get('tiempo_asignacion_medio_ms', 0)} ms"
+            )
+            lineas.append(
+                "  Simulacion dinamica — "
+                f"resoluciones: {dyn.get('resoluciones_asignacion', 0)} · "
+                f"total: {dyn.get('tiempo_asignacion_total_s', 0)} s · "
+                f"medio: {dyn.get('tiempo_asignacion_medio_ms', 0)} ms"
+            )
+            lineas.append("")
+        lineas.append("")
+
     lineas.append("=" * 72)
     lineas.append("Fin del informe")
     lineas.append("=" * 72)

@@ -9,6 +9,13 @@ from simulacion.metricas import (
     _promediar_comparaciones,
     _promediar_resumenes,
 )
+from simulacion.estrategias_asignacion import (
+    ESTRATEGIA_MILP,
+    ESTRATEGIAS_DISPONIBLES,
+    ETIQUETAS_ESTRATEGIA,
+    etiqueta_estrategia,
+    normalizar_estrategia,
+)
 
 
 
@@ -107,6 +114,18 @@ def _bloque_instancia(datos: dict, instancia_id: int) -> dict | None:
     return None
 
 
+def _bloque_estrategia(bloque: dict, estrategia: str) -> dict:
+    estrategias = bloque.get("estrategias")
+    if isinstance(estrategias, dict) and estrategia in estrategias:
+        return estrategias[estrategia]
+    return {
+        "plan_estatico": bloque.get("plan_estatico", {}),
+        "repeticiones": bloque.get("repeticiones", []),
+        "media_dinamico": bloque.get("media_dinamico", {}),
+        "media_comparacion": bloque.get("media_comparacion", {}),
+    }
+
+
 
 
 
@@ -197,21 +216,25 @@ def seleccionar_vista(
     instancia_id: int | None = None,
 
     repeticion: int | None = None,
+    estrategia: str = ESTRATEGIA_MILP,
 
 ) -> dict | None:
+    estrategia_key = normalizar_estrategia(estrategia)
+    estrategia_label = etiqueta_estrategia(estrategia_key)
 
     if modo == "global":
-
-        est = datos["media_global_estatico"]
-
-        dyn = datos["media_global_dinamico"]
+        medias = datos.get("media_global_por_estrategia", {})
+        if estrategia_key in medias:
+            est = medias[estrategia_key].get("estatico", {})
+            dyn = medias[estrategia_key].get("dinamico", {})
+        else:
+            est = datos["media_global_estatico"]
+            dyn = datos["media_global_dinamico"]
 
         comp = _comparar_estatico_dinamico(est, dyn)
 
         return {
-
-            "titulo": "Resumen global (todas las instancias)",
-
+            "titulo": f"Resumen global ({estrategia_label})",
             "subtitulo": "",
 
             "estatico": est,
@@ -231,6 +254,8 @@ def seleccionar_vista(
             "jornada_minutos": est.get("jornada_minutos", 0),
 
             "filas": filas_comparativas(est, dyn),
+            "estrategia": estrategia_key,
+            "estrategia_etiqueta": estrategia_label,
 
         }
 
@@ -252,10 +277,11 @@ def seleccionar_vista(
 
     inst = bloque["instancia"]
 
-    plan = bloque["plan_estatico"]
+    datos_estrategia = _bloque_estrategia(bloque, estrategia_key)
+    plan = datos_estrategia["plan_estatico"]
 
     if modo == "instancia":
-        reps = bloque["repeticiones"]
+        reps = datos_estrategia["repeticiones"]
         n = len(reps)
         dinamicos = [r["dinamico"] for r in reps]
         dyn = _promediar_resumenes(dinamicos)
@@ -273,7 +299,7 @@ def seleccionar_vista(
 
         return {
             "titulo": f"Media instancia {inst.id}: {inst.nombre}",
-            "subtitulo": f"",
+            "subtitulo": f"Estrategia: {estrategia_label}",
             "estatico": plan,
             "dinamico": dyn,
             "comparacion": comp,
@@ -288,6 +314,8 @@ def seleccionar_vista(
             "variabilidad": variabilidad,
             "n_repeticiones": n,
             "filas": filas_comparativas(plan, dyn),
+            "estrategia": estrategia_key,
+            "estrategia_etiqueta": estrategia_label,
         }
 
 
@@ -299,8 +327,7 @@ def seleccionar_vista(
             return None
 
         rep_data = next(
-
-            (r for r in bloque["repeticiones"] if r["repeticion"] == repeticion),
+            (r for r in datos_estrategia["repeticiones"] if r["repeticion"] == repeticion),
 
             None,
 
@@ -313,10 +340,8 @@ def seleccionar_vista(
         dyn = rep_data["dinamico"]
 
         return {
-
             "titulo": f"Instancia {inst.id} · Ejecución {repeticion}/{datos.get('repeticiones', 5)}",
-
-            "subtitulo": "",
+            "subtitulo": f"Estrategia: {estrategia_label}",
 
             "estatico": plan,
 
@@ -343,6 +368,8 @@ def seleccionar_vista(
             "jornada_minutos": plan.get("jornada_minutos", 0),
 
             "filas": filas_comparativas(plan, dyn),
+            "estrategia": estrategia_key,
+            "estrategia_etiqueta": estrategia_label,
 
         }
 
@@ -357,5 +384,14 @@ def seleccionar_vista(
 def lista_instancias(datos: dict) -> list[tuple[int, str]]:
 
     return [(b["instancia"].id, b["instancia"].nombre) for b in datos.get("instancias", [])]
+
+
+def lista_estrategias(datos: dict | None) -> list[tuple[str, str]]:
+    if not datos:
+        keys = list(ESTRATEGIAS_DISPONIBLES)
+        return [(k, ETIQUETAS_ESTRATEGIA.get(k, k)) for k in keys]
+    keys = list(datos.get("estrategias") or ESTRATEGIAS_DISPONIBLES)
+    etiquetas = datos.get("etiquetas_estrategia") or ETIQUETAS_ESTRATEGIA
+    return [(k, etiquetas.get(k, etiqueta_estrategia(k))) for k in keys]
 
 

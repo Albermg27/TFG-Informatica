@@ -17,6 +17,7 @@ RUTA_INFORME_TXT = Path("informe_casos_prueba.txt")
 from simulacion.resultados_casos import (
     hay_resultados,
     lista_instancias,
+    lista_estrategias,
     obtener_resultados,
     seleccionar_vista,
 )
@@ -33,9 +34,19 @@ class EstadisticasController:
         self.combo_rep: ttk.Combobox | None = None
         self.combo_inst: ttk.Combobox | None = None
         self.combo_modo: ttk.Combobox | None = None
+        self.combo_estrategia: ttk.Combobox | None = None
         self._modo_key_by_label: dict[str, str] = {}
+        self._estrategia_key_by_label: dict[str, str] = {}
         self.ejecutando: bool = False
         self._inst_map: dict[str, int] = {}
+        self.estrategia_var: tk.StringVar | None = None
+
+    def _estrategia_actual(self) -> str:
+        if self.combo_estrategia is not None:
+            return self._estrategia_key_by_label.get(self.combo_estrategia.get(), "milp")
+        if self.estrategia_var is not None:
+            return self.estrategia_var.get()
+        return "milp"
 
     def _modo_actual(self) -> str:
         if self.combo_modo is not None:
@@ -72,13 +83,14 @@ class EstadisticasController:
             self.modo_var.set(modo)
         inst_id = self.instancia_var.get() if self.instancia_var else 1
         rep = self.repeticion_var.get() if self.repeticion_var else 1
+        estrategia = self._estrategia_actual()
 
         if modo == "iteracion":
-            vista = seleccionar_vista(datos, "iteracion", inst_id, rep)
+            vista = seleccionar_vista(datos, "iteracion", inst_id, rep, estrategia=estrategia)
         elif modo == "instancia":
-            vista = seleccionar_vista(datos, "instancia", inst_id)
+            vista = seleccionar_vista(datos, "instancia", inst_id, estrategia=estrategia)
         else:
-            vista = seleccionar_vista(datos, "global")
+            vista = seleccionar_vista(datos, "global", estrategia=estrategia)
 
         if vista is None:
             tk.Label(
@@ -182,6 +194,16 @@ class EstadisticasController:
             self.combo_rep["values"] = [str(i) for i in range(1, n + 1)]
             self.combo_rep.current(0)
             self.repeticion_var.set(1)
+        estrategias = lista_estrategias(d)
+        self._estrategia_key_by_label = {etiqueta: key for key, etiqueta in estrategias}
+        if self.combo_estrategia is not None:
+            self.combo_estrategia["values"] = list(self._estrategia_key_by_label.keys())
+            if self.combo_estrategia["values"]:
+                self.combo_estrategia.current(0)
+                if self.estrategia_var is not None:
+                    self.estrategia_var.set(
+                        self._estrategia_key_by_label[self.combo_estrategia.get()]
+                    )
 
     def ejecutar_bateria(self) -> None:
         if self.ejecutando or self.ctx is None:
@@ -306,6 +328,32 @@ class EstadisticasController:
                 self.actualizar_vista()
 
         self.combo_rep.bind("<<ComboboxSelected>>", _on_rep_sel)
+
+        tk.Label(
+            filtros, text="Estrategia", bg=theme.BG_APP, fg=theme.SUBTEXT, font=theme.FONT_SMALL
+        ).pack(side="left", padx=(16, 6))
+        self.estrategia_var = tk.StringVar(value="milp")
+        estrategias = lista_estrategias(datos_ini)
+        self._estrategia_key_by_label = {etiqueta: key for key, etiqueta in estrategias}
+        self.combo_estrategia = ttk.Combobox(
+            filtros,
+            width=28,
+            state="readonly",
+            values=list(self._estrategia_key_by_label.keys()),
+        )
+        self.combo_estrategia.pack(side="left")
+        if self.combo_estrategia["values"]:
+            self.combo_estrategia.current(0)
+            self.estrategia_var.set(self._estrategia_key_by_label[self.combo_estrategia.get()])
+
+        def _on_estrategia_sel(_e=None):
+            if self.combo_estrategia is None or self.estrategia_var is None:
+                return
+            label = self.combo_estrategia.get()
+            self.estrategia_var.set(self._estrategia_key_by_label.get(label, "milp"))
+            self.actualizar_vista()
+
+        self.combo_estrategia.bind("<<ComboboxSelected>>", _on_estrategia_sel)
 
         def _on_modo_sel(_e=None):
             label = self.combo_modo.get()

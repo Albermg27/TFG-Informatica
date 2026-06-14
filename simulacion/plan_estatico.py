@@ -3,11 +3,19 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 
+import random
+
 from datos import cargar_datos_instancia
-from model import asignar_visitas
 from modelos import EstadoCuadrilla, Visita
 from preprocessing import preprocesar
 from simulacion.config_instancia import perfil_simulacion
+from simulacion.estrategias_asignacion import (
+    ESTRATEGIA_MILP,
+    etiqueta_estrategia,
+    medidor_tiempos_asignacion,
+    normalizar_estrategia,
+    resolver_asignacion,
+)
 from simulacion.inventario import (
     aplicar_stock_inicial_cuadrillas,
     calcular_stock_desde_plan,
@@ -61,6 +69,8 @@ def _ejecutar_planificacion(
     D: dict,
     coords: dict,
     K: dict,
+    estrategia: str = ESTRATEGIA_MILP,
+    semilla_aleatoria: int | None = None,
 ) -> tuple[
     dict[int, list[str]],
     dict[int, list[Visita]],
@@ -89,12 +99,29 @@ def _ejecutar_planificacion(
     primera_oleada: list[tuple[int, int]] = []
     oleada_inicial_hecha = False
 
+    estrategia_key = normalizar_estrategia(estrategia)
+    medidor_tiempos_asignacion.reiniciar()
+    rng = (
+        random.Random(semilla_aleatoria)
+        if estrategia_key == "aleatoria"
+        else None
+    )
     while V_pendientes:
         V_est, C_est = preprocesar(V_pendientes, C, M, J, D, modo="estatico")
         if not C_est or not V_est:
             break
 
-        asignaciones = asignar_visitas(V_est, C_est, D, M_big, M, J, "estatico")
+        asignaciones = resolver_asignacion(
+            V_est,
+            C_est,
+            D,
+            M_big,
+            M,
+            J,
+            "estatico",
+            estrategia=estrategia_key,
+            rng=rng,
+        )
         if not asignaciones:
             break
 
@@ -151,6 +178,8 @@ def planificar_instancia(
     instancia_id: int,
     silent: bool = True,
     buffer_stock: float | None = None,
+    estrategia: str = ESTRATEGIA_MILP,
+    semilla_aleatoria: int | None = None,
 ) -> ResultadoPlanEstatico:
     if silent:
         import sys
@@ -175,8 +204,19 @@ def planificar_instancia(
 
     consolidar_stock_cuadrillas_en_almacen(C, M)
 
+    estrategia_key = normalizar_estrategia(estrategia)
     rutas, visitas_por_cuadrilla, primera_oleada, t_max, t_esp, dist, n_plan, V_rest = (
-        _ejecutar_planificacion(V, C, M, params, D, coords, K)
+        _ejecutar_planificacion(
+            V,
+            C,
+            M,
+            params,
+            D,
+            coords,
+            K,
+            estrategia=estrategia_key,
+            semilla_aleatoria=semilla_aleatoria,
+        )
     )
 
     stock = calcular_stock_desde_plan(visitas_por_cuadrilla, buffer_stock)
@@ -198,6 +238,9 @@ def planificar_instancia(
         cronologia_cuadrillas(C),
         nombres_visitas_pendientes(V_rest),
     )
+    metricas["estrategia"] = estrategia_key
+    metricas["estrategia_etiqueta"] = etiqueta_estrategia(estrategia_key)
+    metricas.update(medidor_tiempos_asignacion.resumen())
 
     return ResultadoPlanEstatico(
         metricas=metricas,
@@ -214,11 +257,29 @@ def preparar_cuadrillas_segun_plan(
     instancia_id: int,
     buffer_stock: float | None = None,
     silent: bool = True,
+    estrategia: str = ESTRATEGIA_MILP,
+    semilla_aleatoria: int | None = None,
 ) -> ResultadoPlanEstatico:
-    plan = planificar_instancia(instancia_id, silent=silent, buffer_stock=buffer_stock)
+    plan = planificar_instancia(
+        instancia_id,
+        silent=silent,
+        buffer_stock=buffer_stock,
+        estrategia=estrategia,
+        semilla_aleatoria=semilla_aleatoria,
+    )
     aplicar_stock_inicial_cuadrillas(cuadrillas, plan.stock_inicial, catalogo_materiales)
     return plan
 
 
-def evaluar_planificacion_estatica(instancia_id: int, silent: bool = True) -> dict:
-    return planificar_instancia(instancia_id, silent=silent).metricas
+def evaluar_planificacion_estatica(
+    instancia_id: int,
+    silent: bool = True,
+    estrategia: str = ESTRATEGIA_MILP,
+    semilla_aleatoria: int | None = None,
+) -> dict:
+    return planificar_instancia(
+        instancia_id,
+        silent=silent,
+        estrategia=estrategia,
+        semilla_aleatoria=semilla_aleatoria,
+    ).metricas

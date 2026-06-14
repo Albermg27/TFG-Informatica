@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import math
 import random
 from dataclasses import dataclass
 from typing import Callable
@@ -10,15 +9,21 @@ from datos import enlazar_visita_matriz, cargar_datos_instancia, matriz_km_osrm_
 from modelos import EstadoCuadrilla, TipoVisita, Visita, consumir_materiales_cuadrilla
 from postprocessing import postprocesar
 from preprocessing import preprocesar
-from model import asignar_visitas
-from simulacion.config_instancia import (
-    MADRID_CENTRO,
-    MADRID_LAT_MAX,
-    MADRID_LAT_MIN,
-    MADRID_LON_MAX,
-    MADRID_LON_MIN,
-    coordenada_en_zona,
-    perfil_simulacion,
+from simulacion.config_instancia import perfil_simulacion
+from simulacion.estrategias_asignacion import (
+    ESTRATEGIA_ALEATORIA,
+    ESTRATEGIA_MILP,
+    etiqueta_estrategia,
+    medidor_tiempos_asignacion,
+    normalizar_estrategia,
+    resolver_asignacion,
+)
+from simulacion.guion_eventos import (
+    GuionEventos,
+    PASO_MINUTOS_DEFECTO,
+    MAX_PASOS_DEFECTO,
+    generar_guion_eventos,
+    semilla_factores,
 )
 from simulacion.plan_estatico import preparar_cuadrillas_segun_plan
 from simulacion.metricas import (
@@ -63,19 +68,39 @@ class MotorSimulacion:
         self.finalizada = False
         self.eventos: list[EventoSim] = []
         self.metricas = IndicadoresCalidad()
-        self._rng = random.Random()
+        self._rng_factores = random.Random()
         self._visitas_iniciales = 0
         self._next_visita_seq = 10000
         self._urgente_num = 0
         self._perfil = perfil_simulacion(1)
+        self.estrategia_asignacion = ESTRATEGIA_MILP
+        self._oleada_random = 0
+        self._semilla_base = 0
+        self._guion: GuionEventos | None = None
+        self._guion_cursor_urg = 0
+        self._guion_cursor_canc = 0
 
-    def cargar_instancia(self, instancia_id: int, semilla: int | None = None):
+    def cargar_instancia(
+        self,
+        instancia_id: int,
+        semilla: int | None = None,
+        estrategia_asignacion: str = ESTRATEGIA_MILP,
+        guion_eventos: GuionEventos | None = None,
+    ):
         self.detener()
         self.instancia_id = instancia_id
+        self.estrategia_asignacion = normalizar_estrategia(estrategia_asignacion)
         if semilla is not None:
-            self._rng.seed(semilla)
+            self._semilla_base = int(semilla)
         else:
-            self._rng.seed(instancia_id * 7919)
+            self._semilla_base = int(instancia_id * 7919)
+        self._rng_factores.seed(semilla_factores(self._semilla_base))
+        if guion_eventos is None:
+            guion_eventos = generar_guion_eventos(
+                instancia_id,
+                self._semilla_base,
+            )
+        self._guion = guion_eventos
 
         V, C, M, params, D, coords, K = cargar_datos_instancia(instancia_id)
         self.V = copy.deepcopy(V)
@@ -95,6 +120,8 @@ class MotorSimulacion:
             instancia_id,
             buffer_stock=self._perfil.extra_stock_plan_pct,
             silent=True,
+            estrategia=self.estrategia_asignacion,
+            semilla_aleatoria=semilla,
         )
         for c in self.C:
             c.posicion = self.almacen_id
@@ -110,12 +137,20 @@ class MotorSimulacion:
         self.metricas.reset()
         self._visitas_iniciales = len(self.V)
         self._urgente_num = 0
+        self._oleada_random = 0
+        self._guion_cursor_urg = 0
+        self._guion_cursor_canc = 0
         self.metricas.visitas_pendientes = len(self.V)
-        self._log("sistema", f"Instancia {instancia_id} cargada · {len(self.V)} visitas · jornada {self.J} min")
+        self._log(
+            "sistema",
+            f"Instancia {instancia_id} cargada · {len(self.V)} visitas · jornada {self.J} min · "
+            f"estrategia {etiqueta_estrategia(self.estrategia_asignacion)}",
+        )
 
     def iniciar(self):
         if self.instancia_id is None:
             return
+        medidor_tiempos_asignacion.reiniciar()
         self.pausada = False
         self.activa = True
         self.finalizada = False
@@ -168,7 +203,11 @@ class MotorSimulacion:
         if self.instancia_id:
             self.cargar_instancia(self.instancia_id)
 
-    def simular_hasta_fin(self, paso_minutos: float = 10.0, max_pasos: int = 5000) -> dict:
+    def simular_hasta_fin(
+        self,
+        paso_minutos: float = PASO_MINUTOS_DEFECTO,
+        max_pasos: int = MAX_PASOS_DEFECTO,
+    ) -> dict:
         if self.instancia_id is None:
             return self.metricas.resumen(jornada=self.J)
         self.velocidad = 1.0
@@ -181,10 +220,13 @@ class MotorSimulacion:
             self._finalizar_jornada()
         resumen = self.metricas.resumen(jornada=self.J)
         resumen["modo"] = "dinamico"
+        resumen["estrategia"] = self.estrategia_asignacion
+        resumen["estrategia_etiqueta"] = etiqueta_estrategia(self.estrategia_asignacion)
         resumen["rutas"] = rutas_desde_cuadrillas(self.C)
         resumen["tiempos_cuadrillas"] = tiempos_finales_cuadrillas(self.C)
         resumen["cronologia_cuadrillas"] = cronologia_cuadrillas(self.C)
         resumen["pendientes_nombres"] = nombres_visitas_pendientes(self.V)
+        resumen.update(medidor_tiempos_asignacion.resumen())
         return resumen
 
     def tick(self, dt_real: float = 0.05):
@@ -201,7 +243,7 @@ class MotorSimulacion:
         self._avanzar_fases(dt_aplicado)
 
         if self.jornada_activa():
-            self._eventos_aleatorios(dt_aplicado)
+            self._aplicar_eventos_guion()
             if self.V and any(c.estado == EstadoCuadrilla.LIBRE for c in self.C):
                 self._asignar_cola_pendiente()
 
@@ -219,100 +261,47 @@ class MotorSimulacion:
     def _todas_inactivas(self):
         return self.C and all(c.estado == EstadoCuadrilla.INACTIVA for c in self.C)
 
-    def _eventos_aleatorios(self, dt_minutos: float):
-        if not self.jornada_activa():
+    def _aplicar_eventos_guion(self):
+        if not self.jornada_activa() or self._guion is None:
             return
-        prob = self._perfil.prob_visitas_por_minuto * dt_minutos
-        if prob > 0 and self._rng.random() < prob:
-            self._generar_visita_urgente()
-        prob_cancelacion = self._perfil.prob_cancelaciones_por_minuto * dt_minutos
-        if prob_cancelacion > 0 and self._rng.random() < prob_cancelacion:
-            self._generar_cancelacion_visita()
+        urgentes = self._guion.urgentes
+        while self._guion_cursor_urg < len(urgentes):
+            ev = urgentes[self._guion_cursor_urg]
+            if ev.tiempo > self.tiempo:
+                break
+            self._aplicar_visita_urgente_guion(ev)
+            self._guion_cursor_urg += 1
+
+        cancelaciones = self._guion.cancelaciones
+        while self._guion_cursor_canc < len(cancelaciones):
+            ev = cancelaciones[self._guion_cursor_canc]
+            if ev.tiempo > self.tiempo:
+                break
+            self._aplicar_cancelacion_guion(ev)
+            self._guion_cursor_canc += 1
 
     def _factor_viaje_real(self) -> float:
         p = self._perfil
-        return self._rng.uniform(p.factor_viaje_min, p.factor_viaje_max)
+        return self._rng_factores.uniform(p.factor_viaje_min, p.factor_viaje_max)
 
     def _factor_trabajo_real(self) -> float:
         p = self._perfil
-        return self._rng.uniform(p.factor_trabajo_min, p.factor_trabajo_max)
+        return self._rng_factores.uniform(p.factor_trabajo_min, p.factor_trabajo_max)
 
-    def _coords_visita_urgente(self) -> tuple[float, float]:
-        p = self._perfil
-        amp = 0.006 + p.dispersion_visitas * 0.045
-        modo = p.modo_coords_urgente
-
-        if modo == "dispersa_madrid":
-            return (
-                self._rng.uniform(MADRID_LAT_MIN, MADRID_LAT_MAX),
-                self._rng.uniform(MADRID_LON_MIN, MADRID_LON_MAX),
-            )
-
-        if modo == "periferia_madrid":
-            clat, clon = MADRID_CENTRO
-            ang = self._rng.uniform(0, 2 * math.pi)
-            r = p.radio_urgente_grados + self._rng.uniform(0.05, 0.10)
-            return (clat + r * math.cos(ang), clon + r * math.sin(ang) * 0.85)
-
-        if modo == "cluster" and p.centro_urgente_lat is not None and p.centro_urgente_lon is not None:
-            r = p.radio_urgente_grados
-            return (
-                p.centro_urgente_lat + self._rng.uniform(-r, r),
-                p.centro_urgente_lon + self._rng.uniform(-r, r),
-            )
-
-        if modo == "cerca_almacen":
-            base = self.COORDS.get(self.almacen_id) or next(iter(self.COORDS.values()), MADRID_CENTRO)
-            return (
-                base[0] + self._rng.uniform(-amp, amp),
-                base[1] + self._rng.uniform(-amp, amp),
-            )
-
-        if modo == "zona_plan" and p.zona_urgente:
-            candidatas = [
-                c for c in self.COORDS.values()
-                if coordenada_en_zona(c[0], c[1], p.zona_urgente)
-            ]
-            if candidatas:
-                base_lat, base_lon = self._rng.choice(candidatas)
-                r = p.radio_urgente_grados
-                return (
-                    base_lat + self._rng.uniform(-r, r),
-                    base_lon + self._rng.uniform(-r, r),
-                )
-
-        base_lat, base_lon = self._rng.choice(list(self.COORDS.values()))
-        return (
-            base_lat + self._rng.uniform(-amp, amp),
-            base_lon + self._rng.uniform(-amp, amp),
-        )
-
-    def _generar_visita_urgente(self):
+    def _aplicar_visita_urgente_guion(self, ev):
         if not self.COORDS:
             return
-        tipos = [TipoVisita.TECNICA, TipoVisita.INCIDENCIA, TipoVisita.INSTALACION]
-        p = self._perfil
-        tipo = self._rng.choices(
-            tipos,
-            weights=[p.peso_tecnica, p.peso_incidencia, p.peso_instalacion],
-            k=1,
-        )[0]
-        lat, lon = self._coords_visita_urgente()
         self._next_visita_seq += 1
-        self._urgente_num += 1
+        self._urgente_num = ev.numero_urgente
         visita = Visita(
-            tipo=tipo,
-            prioridad=self._rng.randint(6, 10),
-            nombre=f"Urgente {self._urgente_num}",
-            latitud=lat,
-            longitud=lon,
+            tipo=ev.tipo,
+            prioridad=ev.prioridad,
+            nombre=f"Urgente {ev.numero_urgente}",
+            latitud=ev.latitud,
+            longitud=ev.longitud,
             id=self._next_visita_seq,
         )
-        if tipo == TipoVisita.INCIDENCIA and self._rng.random() < 0.70:
-            visita.materiales_necesarios = {}
-        elif self._rng.random() < 0.30 and self.M:
-            mid = self._rng.choice(list(self.M.keys()))
-            visita.materiales_necesarios = {mid: 1}
+        visita.materiales_necesarios = dict(ev.materiales_necesarios)
         enlazar_visita_matriz(self.D, self.COORDS, visita)
         self.K = matriz_km_osrm_desde_coords(
             self.COORDS,
@@ -324,22 +313,25 @@ class MotorSimulacion:
         est_viaje = self.D.get(self.almacen_id, {}).get(visita.id, 0)
         self._log(
             "visita_nueva",
-            f"Nueva visita: {visita.nombre} ({tipo.value}, {visita.duracion} min, "
+            f"Nueva visita: {visita.nombre} ({ev.tipo.value}, {visita.duracion} min, "
             f"viaje est. {est_viaje:.0f} min)",
             None,
         )
         self._asignar_cola_pendiente()
 
-    def _generar_cancelacion_visita(self):
-        candidatas = [v for v in self.V if v.tipo != TipoVisita.ALMACEN]
-        if not candidatas:
-            return
-
-        no_urgentes = [v for v in candidatas if not self._es_visita_urgente(v)]
-        if no_urgentes and self._rng.random() < 0.75:
-            candidatas = no_urgentes
-
-        visita = self._rng.choice(candidatas)
+    def _aplicar_cancelacion_guion(self, ev):
+        visita = next((v for v in self.V if v.id == ev.visita_id), None)
+        if visita is None or visita.tipo == TipoVisita.ALMACEN:
+            candidatas = sorted(
+                (
+                    v for v in self.V
+                    if v.tipo != TipoVisita.ALMACEN and not self._es_visita_urgente(v)
+                ),
+                key=lambda v: v.id,
+            )
+            if not candidatas:
+                return
+            visita = candidatas[0]
         self.V.remove(visita)
         visita.cancelada = True
         self.metricas.registrar_cancelacion(visita.nombre)
@@ -485,10 +477,24 @@ class MotorSimulacion:
             V_est, C_est = preprocesar(cola, self.C, self.M, self.J, self.D, modo="dinamico")
             if not C_est or not V_est:
                 continue
-            asignaciones = asignar_visitas(
-                V_est, C_est, self.D, self.M_big, self.M, self.J, "dinamico"
+            rng = (
+                random.Random(self._semilla_base * 1_000_003 + self._oleada_random)
+                if self.estrategia_asignacion == ESTRATEGIA_ALEATORIA
+                else None
+            )
+            asignaciones = resolver_asignacion(
+                V_est,
+                C_est,
+                self.D,
+                self.M_big,
+                self.M,
+                self.J,
+                "dinamico",
+                estrategia=self.estrategia_asignacion,
+                rng=rng,
             )
             if not asignaciones:
+                self._oleada_random += 1
                 continue
             asignaciones_ok = []
             for visita, c in asignaciones:
@@ -498,7 +504,9 @@ class MotorSimulacion:
                 asignaciones_ok.append((visita, c))
             if asignaciones_ok:
                 self._aplicar_asignaciones(asignaciones_ok, origen=origen)
+                self._oleada_random += 1
                 return
+            self._oleada_random += 1
 
     def posicion_cuadrilla(self, c) -> tuple[float, float]:
         if c.estado == EstadoCuadrilla.DESPLAZANDOSE and c.visita_actual:
