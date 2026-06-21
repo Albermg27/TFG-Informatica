@@ -11,10 +11,28 @@ def _hay_cuadrillas_libres(C):
     return any(c.estado == EstadoCuadrilla.LIBRE for c in C)
 
 
-def _marcar_cuadrillas_libres_inactivas(C):
+def _cuadrillas_ocupadas(C):
+    return any(
+        c.estado in (EstadoCuadrilla.DESPLAZANDOSE, EstadoCuadrilla.TRABAJANDO)
+        for c in C
+    )
+
+
+def _finalizar_planificacion(C, J, tiempo, max_simulacion, log):
+    while _cuadrillas_ocupadas(C) and tiempo < max_simulacion:
+        for c in C:
+            c.actualizar_estado(J, tiempo)
+        tiempo += 1
+
+    if _cuadrillas_ocupadas(C):
+        log.append("Parada: límite de simulación alcanzado con cuadrillas ocupadas")
+
     for c in C:
-        if c.estado == EstadoCuadrilla.LIBRE:
+        if c.estado != EstadoCuadrilla.INACTIVA:
             c.estado = EstadoCuadrilla.INACTIVA
+        c.visita_actual = None
+
+    return tiempo
 
 
 def ejecutar_sistema_estatico(V, C, M, params, D):
@@ -59,7 +77,6 @@ def ejecutar_sistema_estatico(V, C, M, params, D):
                 f"t={tiempo}: hay cuadrillas libres pero ninguna visita factible "
                 f"({len(V)} pendientes: {nombres})"
             )
-            _marcar_cuadrillas_libres_inactivas(C)
             break
 
         asignaciones = asignar_visitas(V_estrella, C_estrella, D, M_big, M, J, "estatico")
@@ -69,7 +86,6 @@ def ejecutar_sistema_estatico(V, C, M, params, D):
                 f"t={tiempo}: el modelo no pudo asignar visitas "
                 f"({len(V_estrella)} candidatas, {len(C_estrella)} cuadrillas libres)"
             )
-            _marcar_cuadrillas_libres_inactivas(C)
             break
 
         V, C = postprocesar(asignaciones, V, C, M, D, False)
@@ -80,6 +96,8 @@ def ejecutar_sistema_estatico(V, C, M, params, D):
         log.append(f"Visitas no asignadas al final: {len(V)}")
         for v in V:
             log.append(f"  - {v.nombre} (id {v.id})")
+
+    _finalizar_planificacion(C, J, tiempo, max_simulacion, log)
 
     log.append("Fin de la jornada")
 
