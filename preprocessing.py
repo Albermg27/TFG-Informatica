@@ -51,6 +51,16 @@ def filtrar_por_prioridad(V, limite=LIMITE_VISITAS_PRIORIDAD):
     return sorted(V, key=lambda v: (-v.prioridad, v.nombre))[:limite]
 
 
+def construir_pares_factibles(V, C, D, J, M, modo="estatico"):
+    
+    F = set()
+    for i, v in enumerate(V):
+        for c, cuadrilla in enumerate(C):
+            if _par_factible(v, cuadrilla, D, J, modo, M):
+                F.add((i, c))
+    return F
+
+
 def preprocesar(V, C, M, J, D, modo="estatico"):
 
     C_estrella = obtener_cuadrillas_libres(C)
@@ -65,4 +75,6 @@ def preprocesar(V, C, M, J, D, modo="estatico"):
 
     C_estrella = filtrar_cuadrillas_operativas(V_estrella, C_estrella, D, J, M, modo)
 
-    return V_estrella, C_estrella
+    F = construir_pares_factibles(V_estrella, C_estrella, D, J, M, modo)
+
+    return V_estrella, C_estrella, F

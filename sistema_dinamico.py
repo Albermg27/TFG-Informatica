@@ -7,13 +7,13 @@ from resultado import visualizar_rutas
 from backend_ui import DATA
 import estado_dinamico as estado
 from estado_dinamico import (
-    V, C, M, D, COORDS, J, V_HISTORICO, M_big, INICIALIZADO
+    V, C, M, D, COORDS, J, V_HISTORICO, INICIALIZADO
 )
 
 import copy
 
 def inicializar_sistema():
-    global INICIALIZADO, J, M_big
+    global INICIALIZADO, J
 
     if INICIALIZADO:
         return
@@ -40,7 +40,6 @@ def inicializar_sistema():
     V_HISTORICO.extend(copy.deepcopy(V))
 
     J = copy.deepcopy(DATA["params"]["J"])
-    M_big = copy.deepcopy(DATA["params"]["M_big"])
 
     _ajustar_stock_almacen_por_cuadrillas()
     INICIALIZADO = True
@@ -71,7 +70,7 @@ def _registrar_resultado_asignacion(estado_resultado, mensaje, asignaciones=None
 def _ejecutar_asignacion_interna():
     global V, C
 
-    V_estrella, C_estrella = preprocesar(V, C, M, J, D, modo="dinamico")
+    V_estrella, C_estrella, F = preprocesar(V, C, M, J, D, modo="dinamico")
 
     if not C_estrella:
         _registrar_resultado_asignacion(
@@ -88,9 +87,7 @@ def _ejecutar_asignacion_interna():
         )
         return V, C
 
-    asignaciones = asignar_visitas(
-        V_estrella, C_estrella, D, M_big, M, J, "dinamico"
-    )
+    asignaciones = asignar_visitas(V_estrella, C_estrella, D, F)
 
     if not asignaciones:
         _registrar_resultado_asignacion(

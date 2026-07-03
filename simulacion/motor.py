@@ -59,7 +59,6 @@ class MotorSimulacion:
         self.COORDS: dict = {}
         self.K: dict = {}
         self.J = 1000
-        self.M_big = 1000
         self.almacen_id = 1
         self.tiempo = 0.0
         self.velocidad = 2.0
@@ -110,7 +109,6 @@ class MotorSimulacion:
         self.COORDS = copy.deepcopy(coords)
         self.K = copy.deepcopy(K)
         self.J = params["J"]
-        self.M_big = params["M_big"]
         self.almacen_id = params["almacen_id"]
 
         self._perfil = perfil_simulacion(instancia_id)
@@ -474,7 +472,7 @@ class MotorSimulacion:
         for cola, origen in colas:
             if not cola:
                 continue
-            V_est, C_est = preprocesar(cola, self.C, self.M, self.J, self.D, modo="dinamico")
+            V_est, C_est, F = preprocesar(cola, self.C, self.M, self.J, self.D, modo="dinamico")
             if not C_est or not V_est:
                 continue
             rng = (
@@ -486,7 +484,7 @@ class MotorSimulacion:
                 V_est,
                 C_est,
                 self.D,
-                self.M_big,
+                F,
                 self.M,
                 self.J,
                 "dinamico",

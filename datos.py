@@ -190,7 +190,7 @@ def cargar_datos(instancia_id: int = INSTANCIA_OPERATIVA_ID):
     inst = get_instancia_db(instancia_id)
     jornada = inst.jornada_minutos if inst else 1000
 
-    params = {"J": jornada, "M_big": 1000, "instancia_id": instancia_id, "almacen_id": almacen_id}
+    params = {"J": jornada, "instancia_id": instancia_id, "almacen_id": almacen_id}
 
     coords = coords_desde_visitas(V0)
     D = crear_matriz_distancias_osrm(
@@ -218,7 +218,6 @@ def cargar_datos_instancia(instancia_id: int):
         jornada = inst.jornada_minutos if inst else 1000
         params = {
             "J": jornada,
-            "M_big": 1000,
             "instancia_id": instancia_id,
             "almacen_id": almacen_id,
         }
@@ -243,7 +242,7 @@ def cargar_datos_instancia(instancia_id: int):
     inst = get_instancia_db(instancia_id)
     jornada = inst.jornada_minutos if inst else 1000
 
-    params = {"J": jornada, "M_big": 1000, "instancia_id": instancia_id, "almacen_id": almacen_id}
+    params = {"J": jornada, "instancia_id": instancia_id, "almacen_id": almacen_id}
 
     coords = coords_desde_visitas(V0)
     D = crear_matriz_distancias_osrm(

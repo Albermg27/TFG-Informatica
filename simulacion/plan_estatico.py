@@ -81,7 +81,6 @@ def _ejecutar_planificacion(
     list,
 ]:
     J = params["J"]
-    M_big = params["M_big"]
     almacen_id = params["almacen_id"]
 
     rutas: dict[int, list[str]] = {c.id: [] for c in C}
@@ -107,7 +106,7 @@ def _ejecutar_planificacion(
         else None
     )
     while V_pendientes:
-        V_est, C_est = preprocesar(V_pendientes, C, M, J, D, modo="estatico")
+        V_est, C_est, F = preprocesar(V_pendientes, C, M, J, D, modo="estatico")
         if not C_est or not V_est:
             break
 
@@ -115,7 +114,7 @@ def _ejecutar_planificacion(
             V_est,
             C_est,
             D,
-            M_big,
+            F,
             M,
             J,
             "estatico",

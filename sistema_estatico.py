@@ -40,7 +40,6 @@ def ejecutar_sistema_estatico(V, C, M, params, D):
     log.append("Inicio Sistema")
 
     J = params["J"]
-    M_big = params["M_big"]
 
     tiempo = 0
     max_simulacion = J * len(C) * 4 + len(V) * 500
@@ -63,7 +62,7 @@ def ejecutar_sistema_estatico(V, C, M, params, D):
         if not _hay_cuadrillas_libres(C):
             continue
 
-        V_estrella, C_estrella = preprocesar(V, C, M, J, D, modo="estatico")
+        V_estrella, C_estrella, F = preprocesar(V, C, M, J, D, modo="estatico")
 
         if not C_estrella:
             tiempo += 1
@@ -79,7 +78,7 @@ def ejecutar_sistema_estatico(V, C, M, params, D):
             )
             break
 
-        asignaciones = asignar_visitas(V_estrella, C_estrella, D, M_big, M, J, "estatico")
+        asignaciones = asignar_visitas(V_estrella, C_estrella, D, F)
 
         if not asignaciones:
             log.append(

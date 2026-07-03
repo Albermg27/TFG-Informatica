@@ -150,7 +150,7 @@ def resolver_asignacion(
     V,
     C,
     D,
-    M_big,
+    F,
     materiales,
     J,
     modo,
@@ -161,13 +161,13 @@ def resolver_asignacion(
     try:
         estrategia_key = normalizar_estrategia(estrategia)
         if estrategia_key == ESTRATEGIA_MILP:
-            return asignar_visitas(V, C, D, M_big, materiales, J, modo)
+            return asignar_visitas(V, C, D, F)
         if estrategia_key == ESTRATEGIA_CERCANA:
             return _asignar_cercana(V, C, D, materiales, J, modo)
         if estrategia_key == ESTRATEGIA_ALEATORIA:
             return _asignar_aleatoria(V, C, D, materiales, J, modo, rng=rng)
         if estrategia_key == ESTRATEGIA_PRIORIDAD:
             return _asignar_prioridad(V, C, D, materiales, J, modo)
-        return asignar_visitas(V, C, D, M_big, materiales, J, modo)
+        return asignar_visitas(V, C, D, F)
     finally:
         medidor_tiempos_asignacion.registrar(time.perf_counter() - t0)
