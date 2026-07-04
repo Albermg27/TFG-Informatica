@@ -51,6 +51,31 @@ def filtrar_por_prioridad(V, limite=LIMITE_VISITAS_PRIORIDAD):
     return sorted(V, key=lambda v: (-v.prioridad, v.nombre))[:limite]
 
 
+def asegurar_cobertura_cuadrillas(V_candidatas, V_completa, C, D, J, M, modo="estatico"):
+    seleccion = list(V_candidatas)
+    ids = {v.id for v in seleccion}
+
+    for cuadrilla in C:
+        if any(
+            v.id in ids and _par_factible(v, cuadrilla, D, J, modo, M)
+            for v in seleccion
+        ):
+            continue
+
+        candidatas = [
+            v for v in V_completa if _par_factible(v, cuadrilla, D, J, modo, M)
+        ]
+        if not candidatas:
+            continue
+
+        mejor = min(candidatas, key=lambda v: D[cuadrilla.posicion][v.id])
+        if mejor.id not in ids:
+            seleccion.append(mejor)
+            ids.add(mejor.id)
+
+    return seleccion
+
+
 def construir_pares_factibles(V, C, D, J, M, modo="estatico"):
     
     F = set()
@@ -71,7 +96,11 @@ def preprocesar(V, C, M, J, D, modo="estatico"):
 
     V_estrella = eliminar_visitas_imposibles_global(V_estrella, C_estrella, D, J, M, modo)
 
+    V_antes_prioridad = V_estrella
     V_estrella = filtrar_por_prioridad(V_estrella)
+    V_estrella = asegurar_cobertura_cuadrillas(
+        V_estrella, V_antes_prioridad, C_estrella, D, J, M, modo
+    )
 
     C_estrella = filtrar_cuadrillas_operativas(V_estrella, C_estrella, D, J, M, modo)
 

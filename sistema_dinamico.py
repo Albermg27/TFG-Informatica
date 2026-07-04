@@ -40,6 +40,7 @@ def inicializar_sistema():
     V_HISTORICO.extend(copy.deepcopy(V))
 
     J = copy.deepcopy(DATA["params"]["J"])
+    estado.J = J
 
     _ajustar_stock_almacen_por_cuadrillas()
     INICIALIZADO = True
